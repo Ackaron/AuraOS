@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "magic-ui": {
+      "command": "npx",
+      "args": ["-y", "@21st-dev/magic-mcp"],
+      "env": {
+        "API_KEY": "MAGIC_API_KEY"
+      },
+      "description": "Прямой доступ к библиотеке компонентов 21st.dev. Позволяет искать, скачивать и вставлять UI-паттерны прямо в код."
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "description": "Инструмент для сложного планирования. Заставляет модель думать пошагово, исправляя свои ошибки в процессе рассуждения."
+    },
+    "browser-automation": {
+      "command": "npx",
+      "args": ["-y", "@lackeyjb/mcp-playwright"],
+      "description": "Дает агенту возможность управлять браузером через Playwright: навигация, клики, скриншоты и проверка UI."
+    },
+    "google-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-google-search"],
+      "env": {
+        "GOOGLE_API_KEY": "GOOGLE_API_KEY",
+        "GOOGLE_ENGINE_ID": "GOOGLE_ENGINE_ID"
+      },
+      "description": "Дает агенту доступ к живому поиску Google для проверки документации и решения багов."
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "description": "Позволяет агенту скачивать контент по URL для глубокого анализа документации."
+    }
+  }
+}
