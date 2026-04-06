@@ -60,5 +60,14 @@
 - `vault/sessions/2026-04-05_initialization.md` — Bootstrap
 - `vault/sessions/2026-04-06_context-awareness.md` — Context RAG
 - `vault/sessions/2026-04-06_refactoring-fixes.md` — Refactoring & Bug Fixes
+- `vault/sessions/2026-04-06_ui-fixes-github.md` — UI Fixes & GitHub Push
+
+---
+
+## 🔗 GitHub
+
+- **Repository**: https://github.com/Ackaron/AuraOS.git
+- **Branch**: main
+- **Last Commit**: `32ab4e2` — Fix: Direct DOM manipulation for smooth resizing
 
 *Обновлено: 2026-04-06*
