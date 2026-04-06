@@ -28,21 +28,9 @@ export function Layout({ children, sidebar, agentPanel }: LayoutProps) {
   
   const [isDraggingAgent, setIsDraggingAgent] = useState(false);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
-  const [sidebarDragWidth, setSidebarDragWidth] = useState(sidebarWidth);
-  const [agentDragWidth, setAgentDragWidth] = useState(agentWidth);
+  const sidebarAsideRef = useRef<HTMLDivElement>(null);
+  const agentAsideRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!isDraggingSidebar) {
-      setSidebarDragWidth(sidebarWidth);
-    }
-  }, [sidebarWidth, isDraggingSidebar]);
-
-  useEffect(() => {
-    if (!isDraggingAgent) {
-      setAgentDragWidth(agentWidth);
-    }
-  }, [agentWidth, isDraggingAgent]);
 
   const handleSidebarDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -60,33 +48,33 @@ export function Layout({ children, sidebar, agentPanel }: LayoutProps) {
     
     const containerRect = containerRef.current.getBoundingClientRect();
     
-    if (isDraggingSidebar && !isSidebarCollapsed) {
+    if (isDraggingSidebar && !isSidebarCollapsed && sidebarAsideRef.current) {
       const newWidth = e.clientX - containerRect.left;
-      if (newWidth >= MIN_SIDEBAR_WIDTH && newWidth <= MAX_SIDEBAR_WIDTH) {
-        setSidebarDragWidth(newWidth);
-      }
+      const clampedWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, newWidth));
+      sidebarAsideRef.current.style.width = `${clampedWidth}px`;
     }
     
-    if (isDraggingAgent) {
+    if (isDraggingAgent && agentAsideRef.current) {
       const newWidth = containerRect.right - e.clientX;
-      if (newWidth >= MIN_AGENT_WIDTH && newWidth <= MAX_AGENT_WIDTH) {
-        setAgentDragWidth(newWidth);
-      }
+      const clampedWidth = Math.max(MIN_AGENT_WIDTH, Math.min(MAX_AGENT_WIDTH, newWidth));
+      agentAsideRef.current.style.width = `${clampedWidth}px`;
     }
   }, [isDraggingAgent, isDraggingSidebar, isSidebarCollapsed]);
 
   const handleMouseUp = useCallback(() => {
-    if (isDraggingAgent) {
-      setAgentWidth(agentDragWidth);
-      localStorage.setItem('auraos-agent-panel-width', agentDragWidth.toString());
+    if (isDraggingAgent && agentAsideRef.current) {
+      const newWidth = parseInt(agentAsideRef.current.style.width) || agentWidth;
+      setAgentWidth(newWidth);
+      localStorage.setItem('auraos-agent-panel-width', newWidth.toString());
     }
-    if (isDraggingSidebar) {
-      setSidebarWidth(sidebarDragWidth);
-      localStorage.setItem('auraos-sidebar-width', sidebarDragWidth.toString());
+    if (isDraggingSidebar && sidebarAsideRef.current) {
+      const newWidth = parseInt(sidebarAsideRef.current.style.width) || sidebarWidth;
+      setSidebarWidth(newWidth);
+      localStorage.setItem('auraos-sidebar-width', newWidth.toString());
     }
     setIsDraggingAgent(false);
     setIsDraggingSidebar(false);
-  }, [isDraggingAgent, isDraggingSidebar, agentDragWidth, sidebarDragWidth, setAgentWidth, setSidebarWidth]);
+  }, [isDraggingAgent, isDraggingSidebar, agentWidth, sidebarWidth, setAgentWidth, setSidebarWidth]);
 
   useEffect(() => {
     if (isDraggingAgent || isDraggingSidebar) {
@@ -104,20 +92,14 @@ export function Layout({ children, sidebar, agentPanel }: LayoutProps) {
     };
   }, [isDraggingAgent, isDraggingSidebar, handleMouseMove, handleMouseUp]);
 
-  const currentSidebarWidth = isSidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : (isDraggingSidebar ? sidebarDragWidth : sidebarWidth);
-  const currentAgentWidth = isDraggingAgent ? agentDragWidth : agentWidth;
-
-  const sidebarTransition = isDraggingSidebar 
-    ? { duration: 0 } 
-    : { type: 'spring' as const, stiffness: 280, damping: 28, mass: 0.8 };
-  const agentTransition = isDraggingAgent 
-    ? { duration: 0 } 
-    : { type: 'spring' as const, stiffness: 280, damping: 28, mass: 0.8 };
+  const currentSidebarWidth = isSidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth;
+  const currentAgentWidth = agentWidth;
 
   return (
     <div className="flex h-screen w-full bg-aura-black overflow-hidden">
       <AnimatePresence mode="wait">
         <motion.aside
+          ref={sidebarAsideRef}
           initial={{ x: -320, opacity: 0 }}
           animate={{ 
             x: 0, 
@@ -125,7 +107,12 @@ export function Layout({ children, sidebar, agentPanel }: LayoutProps) {
             width: currentSidebarWidth 
           }}
           exit={{ x: -320, opacity: 0 }}
-          transition={sidebarTransition}
+          transition={{ 
+            type: 'spring', 
+            stiffness: 280, 
+            damping: 28,
+            mass: 0.8
+          }}
           className="h-full flex flex-col bg-gradient-to-b from-white/[0.03] to-transparent border-r border-white/[0.06] relative shrink-0"
         >
           <button
@@ -178,10 +165,16 @@ export function Layout({ children, sidebar, agentPanel }: LayoutProps) {
               onMouseDown={handleAgentDragStart}
             />
             <motion.aside
+              ref={agentAsideRef}
               initial={{ x: 50, opacity: 0 }}
               animate={{ x: 0, opacity: 1, width: currentAgentWidth }}
               exit={{ x: 50, opacity: 0 }}
-              transition={agentTransition}
+              transition={{ 
+                type: 'spring', 
+                stiffness: 280, 
+                damping: 28,
+                mass: 0.8
+              }}
               className="h-full bg-gradient-to-l from-white/[0.02] to-transparent border-l border-white/[0.06] shrink-0 overflow-hidden"
             >
               {agentPanel}
