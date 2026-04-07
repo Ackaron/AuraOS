@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Code, FileText, Zap, ChevronDown, Check, Settings } from 'lucide-react';
+import { Brain, Code, FileText, Zap, ChevronDown, ChevronUp, Check, Settings } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useAuraStore, type TaskType } from '@/stores';
 import { cn } from '@/lib/utils';
@@ -16,8 +16,15 @@ interface ModelRouterPanelProps {
 }
 
 export function ModelRouterPanel({ isCollapsed = false }: ModelRouterPanelProps) {
-  const { modelRouter, currentTaskType, availableModels, setModelForTask, setCurrentTaskType } = useAuraStore();
-  const [expanded, setExpanded] = useState(true);
+  const { 
+    modelRouter, 
+    currentTaskType, 
+    availableModels, 
+    setModelForTask, 
+    setCurrentTaskType,
+    isModelRouterExpanded,
+    setModelRouterExpanded
+  } = useAuraStore();
   const [openDropdown, setOpenDropdown] = useState<TaskType | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -38,7 +45,7 @@ export function ModelRouterPanel({ isCollapsed = false }: ModelRouterPanelProps)
 
   if (isCollapsed) {
     return (
-      <div className="flex flex-col items-center gap-3 py-2">
+      <div className="flex flex-col items-center justify-center gap-3 py-3">
         <Settings className="w-4 h-4 text-aura-accent" />
         {roleConfig.map((role) => {
           const Icon = role.icon;
@@ -49,31 +56,33 @@ export function ModelRouterPanel({ isCollapsed = false }: ModelRouterPanelProps)
   }
 
   return (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="px-4 py-2 space-y-4">
+      <div 
+        className="flex items-center justify-between cursor-pointer group"
+        onClick={() => setModelRouterExpanded(!isModelRouterExpanded)}
+      >
         <div className="flex items-center gap-2">
-          <Settings className="w-4 h-4 text-aura-accent" />
-          <span className="text-sm font-medium text-white/80 tracking-tight">
+          <Settings className="w-4 h-4 text-aura-accent/80 group-hover:text-aura-accent transition-colors" />
+          <span className="text-sm font-medium text-white/60 tracking-tight group-hover:text-white/90 transition-colors">
             Model Router
           </span>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setExpanded(!expanded)}
-          className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-        >
-          <ChevronDown className={cn('w-3.5 h-3.5 text-aura-muted transition-transform', expanded && 'rotate-180')} />
-        </motion.button>
+        <div className="p-1.5 rounded-lg hover:bg-white/5 transition-colors">
+          {isModelRouterExpanded ? (
+            <ChevronUp className="w-3.5 h-3.5 text-aura-muted" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 text-aura-muted" />
+          )}
+        </div>
       </div>
 
       <AnimatePresence>
-        {expanded && (
+        {isModelRouterExpanded && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="space-y-2"
+            className="space-y-2 overflow-hidden"
             ref={dropdownRef}
           >
             {roleConfig.map((role, index) => {

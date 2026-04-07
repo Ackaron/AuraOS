@@ -69,9 +69,10 @@ interface FileTreeNodeProps {
   node: FileNode;
   depth: number;
   onFileClick?: (path: string) => void;
+  onDirectoryClick?: (path: string) => void;
 }
 
-function FileTreeNode({ node, depth, onFileClick }: FileTreeNodeProps) {
+function FileTreeNode({ node, depth, onFileClick, onDirectoryClick }: FileTreeNodeProps) {
   const [isOpen, setIsOpen] = useState(depth < 2);
   
   const Icon = getFileIcon(node.name, node.is_dir);
@@ -79,9 +80,17 @@ function FileTreeNode({ node, depth, onFileClick }: FileTreeNodeProps) {
   
   const handleClick = () => {
     if (node.is_dir) {
-      setIsOpen(!isOpen);
+      if (onDirectoryClick) {
+        onDirectoryClick(node.path);
+      }
     } else if (onFileClick) {
       onFileClick(node.path);
+    }
+  };
+
+  const handleDoubleClick = () => {
+    if (node.is_dir) {
+      setIsOpen(!isOpen);
     }
   };
   
@@ -96,6 +105,7 @@ function FileTreeNode({ node, depth, onFileClick }: FileTreeNodeProps) {
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
       >
         {node.is_dir && (
           <ChevronRight 
@@ -135,6 +145,7 @@ function FileTreeNode({ node, depth, onFileClick }: FileTreeNodeProps) {
                 node={child}
                 depth={depth + 1}
                 onFileClick={onFileClick}
+                onDirectoryClick={onDirectoryClick}
               />
             ))}
           </motion.div>
@@ -147,9 +158,10 @@ function FileTreeNode({ node, depth, onFileClick }: FileTreeNodeProps) {
 interface FileTreeProps {
   tree: FileNode[];
   onFileClick?: (path: string) => void;
+  onDirectoryClick?: (path: string) => void;
 }
 
-export function FileTree({ tree, onFileClick }: FileTreeProps) {
+export function FileTree({ tree, onFileClick, onDirectoryClick }: FileTreeProps) {
   if (tree.length === 0) {
     return (
       <div className="py-4 text-center">
@@ -166,6 +178,7 @@ export function FileTree({ tree, onFileClick }: FileTreeProps) {
           node={node}
           depth={0}
           onFileClick={onFileClick}
+          onDirectoryClick={onDirectoryClick}
         />
       ))}
     </div>

@@ -73,6 +73,13 @@ export interface OpenFile {
   language: string;
 }
 
+export interface TerminalSession {
+  id: string;
+  name: string;
+  cwd: string;
+  isRunning: boolean;
+}
+
 interface AuraState {
   models: ModelStatus[];
   skills: Skill[];
@@ -95,6 +102,8 @@ interface AuraState {
   
   // Terminal
   terminalCwd: string | null;
+  terminalSessions: TerminalSession[];
+  activeTerminalId: string | null;
   
   // Project Context (RAG Lite)
   projectContext: string;
@@ -108,6 +117,11 @@ interface AuraState {
   isTerminalOpen: boolean;
   sidebarWidth: number;
   agentWidth: number;
+  
+  // Panel States
+  isProjectExpanded: boolean;
+  isSkillCoreExpanded: boolean;
+  isModelRouterExpanded: boolean;
   
   setModelStatus: (model: ModelStatus) => void;
   setActiveModel: (modelName: string | null) => void;
@@ -125,6 +139,10 @@ interface AuraState {
   setActiveProject: (projectId: string, projectPath: string) => void;
   setProjectFileTree: (tree: FileNode[]) => void;
   setTerminalCwd: (cwd: string) => void;
+  addTerminalSession: (cwd: string, name?: string) => string;
+  removeTerminalSession: (id: string) => void;
+  setActiveTerminalId: (id: string | null) => void;
+  updateTerminalSession: (id: string, updates: Partial<TerminalSession>) => void;
   setProjectContext: (context: string) => void;
   openFile: (file: OpenFile) => void;
   closeFile: (path: string) => void;
@@ -133,6 +151,9 @@ interface AuraState {
   toggleTerminal: () => void;
   setSidebarWidth: (width: number) => void;
   setAgentWidth: (width: number) => void;
+  setProjectExpanded: (expanded: boolean) => void;
+  setSkillCoreExpanded: (expanded: boolean) => void;
+  setModelRouterExpanded: (expanded: boolean) => void;
 }
 
 export const useAuraStore = create<AuraState>()(
@@ -167,7 +188,10 @@ export const useAuraStore = create<AuraState>()(
       activeProjectPath: null,
       activeProjectId: null,
       projectFileTree: [],
+      // Terminal
       terminalCwd: null,
+      terminalSessions: [],
+      activeTerminalId: null,
       projectContext: '',
       
       // File Viewer
@@ -179,6 +203,11 @@ export const useAuraStore = create<AuraState>()(
       isTerminalOpen: false,
       sidebarWidth: Number(localStorage.getItem('auraos-sidebar-width')) || 280,
       agentWidth: Number(localStorage.getItem('auraos-agent-panel-width')) || 320,
+
+      // Panel States - Collapsed by default on startup
+      isProjectExpanded: false,
+      isSkillCoreExpanded: false,
+      isModelRouterExpanded: false,
 
       setModelStatus: (model) =>
         set((state) => ({
@@ -259,7 +288,51 @@ export const useAuraStore = create<AuraState>()(
       }),
       
       setProjectFileTree: (tree) => set({ projectFileTree: tree }),
-      setTerminalCwd: (cwd) => set({ terminalCwd: cwd }),
+      setTerminalCwd: (cwd) => set((state) => {
+        if (state.activeTerminalId) {
+          return {
+            terminalCwd: cwd,
+            terminalSessions: state.terminalSessions.map(s => 
+              s.id === state.activeTerminalId ? { ...s, cwd } : s
+            )
+          };
+        }
+        return { terminalCwd: cwd };
+      }),
+
+      addTerminalSession: (cwd, name) => {
+        const id = crypto.randomUUID();
+        const newSession: TerminalSession = {
+          id,
+          name: name || 'Terminal',
+          cwd,
+          isRunning: false,
+        };
+        set((state) => ({
+          terminalSessions: [...state.terminalSessions, newSession],
+          activeTerminalId: id,
+          isTerminalOpen: true,
+        }));
+        return id;
+      },
+
+      removeTerminalSession: (id) => set((state) => {
+        const newSessions = state.terminalSessions.filter(s => s.id !== id);
+        return {
+          terminalSessions: newSessions,
+          activeTerminalId: state.activeTerminalId === id 
+            ? (newSessions[newSessions.length - 1]?.id || null)
+            : state.activeTerminalId
+        };
+      }),
+
+      setActiveTerminalId: (id) => set({ activeTerminalId: id }),
+
+      updateTerminalSession: (id, updates) => set((state) => ({
+        terminalSessions: state.terminalSessions.map(s => 
+          s.id === id ? { ...s, ...updates } : s
+        )
+      })),
       setProjectContext: (context) => set({ projectContext: context }),
       
       openFile: (file) => set((state) => {
@@ -303,6 +376,11 @@ export const useAuraStore = create<AuraState>()(
         localStorage.setItem('auraos-agent-panel-width', String(width));
         set({ agentWidth: width });
       },
+
+      // Panel States
+      setProjectExpanded: (expanded) => set({ isProjectExpanded: expanded }),
+      setSkillCoreExpanded: (expanded) => set({ isSkillCoreExpanded: expanded }),
+      setModelRouterExpanded: (expanded) => set({ isModelRouterExpanded: expanded }),
     }),
     { name: 'AuraStore' }
   )

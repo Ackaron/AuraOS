@@ -178,11 +178,16 @@
   },
   "active": "197e57c57099e355",
   "lastOpenFiles": [
+    "CLAUDE.md",
+    "vault/sessions/2026-04-06_ui-enhancements.md",
+    "vault/sessions",
+    "vault",
+    "architecture/ADR-001-initial-structure.md",
+    "PROJECT_IDEA.md",
     "sessions/2026-04-06_context-awareness.md",
     "architecture/ADR-007-invisible-context.md",
     "index.md",
     "architecture/ADR-005-hardware-polling.md",
-    "architecture/ADR-004-dynamic-routing.md",
-    "architecture/ADR-001-initial-structure.md"
+    "architecture/ADR-004-dynamic-routing.md"
   ]
 }

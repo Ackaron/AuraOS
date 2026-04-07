@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
@@ -50,6 +52,7 @@ impl OllamaService {
         
         match client.get(&format!("{}/api/tags", self.base_url)).send().await {
             Ok(response) => {
+                log::info!("[OLLAMA] Status check URL: {}, Response code: {}", format!("{}/api/tags", self.base_url), response.status());
                 if response.status().is_success() {
                     match response.json::<serde_json::Value>().await {
                         Ok(json) => {
@@ -94,21 +97,29 @@ impl OllamaService {
         }
     }
 
-    pub async fn generate(&self, model: &str, prompt: &str) -> Result<String, String> {
+    pub async fn generate(&self, model: &str, system_prompt: &str, user_prompt: &str) -> Result<String, String> {
         let client = reqwest::Client::new();
         
         let body = serde_json::json!({
             "model": model,
-            "prompt": prompt,
+            "messages": [
+                { "role": "system", "content": system_prompt },
+                { "role": "user", "content": user_prompt }
+            ],
             "stream": false
         });
 
         let response = client
-            .post(&format!("{}/api/generate", self.base_url))
+            .post(&format!("{}/api/chat", self.base_url))
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+            .map_err(|e| {
+                log::error!("[OLLAMA] Request failed for model '{}': {}", model, e);
+                format!("Request failed: {}", e)
+            })?;
+
+        log::info!("[OLLAMA] /api/chat model '{}' status: {}", model, response.status());
 
         if response.status().is_success() {
             let json: serde_json::Value = response
@@ -116,31 +127,42 @@ impl OllamaService {
                 .await
                 .map_err(|e| format!("Parse error: {}", e))?;
             
-            Ok(json.get("response")
+            Ok(json.get("message")
+                .and_then(|m| m.get("content"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string())
+        } else if response.status() == 404 {
+            Err(format!(
+                "HTTP 404: Модель '{}' не найдена. Пожалуйста, убедитесь, что она скачана (команда: ollama pull {}).",
+                model, model
+            ))
         } else {
-            Err(format!("HTTP error: {}", response.status()))
+            Err(format!("HTTP error {}: {}", response.status(), response.url()))
         }
     }
 
     pub async fn generate_streaming(
         &self,
         model: &str,
-        prompt: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+        cancellation_token: Option<Arc<AtomicBool>>,
         on_chunk: impl Fn(String) + Send + 'static,
     ) -> Result<String, String> {
         let client = reqwest::Client::new();
         
         let body = serde_json::json!({
             "model": model,
-            "prompt": prompt,
+            "messages": [
+                { "role": "system", "content": system_prompt },
+                { "role": "user", "content": user_prompt }
+            ],
             "stream": true
         });
 
         let response = client
-            .post(&format!("{}/api/generate", self.base_url))
+            .post(&format!("{}/api/chat", self.base_url))
             .json(&body)
             .send()
             .await
@@ -155,12 +177,19 @@ impl OllamaService {
         
         use futures_util::StreamExt;
         while let Some(item) = stream.next().await {
+            if let Some(ref token) = cancellation_token {
+                if token.load(Ordering::SeqCst) {
+                    log::info!("[OLLAMA] Streaming cancelled by token");
+                    break;
+                }
+            }
+
             match item {
                 Ok(bytes) => {
                     if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                         for line in text.lines() {
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-                                if let Some(chunk) = json.get("response").and_then(|v| v.as_str()) {
+                                if let Some(chunk) = json.get("message").and_then(|m| m.get("content")).and_then(|v| v.as_str()) {
                                     on_chunk(chunk.to_string());
                                     full_response.push_str(chunk);
                                 }

@@ -20,7 +20,7 @@ export function ModelMonitor({ isCollapsed = false }: ModelMonitorProps) {
 
   if (isCollapsed) {
     return (
-      <div className="flex flex-col items-center gap-4 py-2">
+      <div className="flex flex-col items-center justify-center gap-3 py-3">
         <motion.div
           animate={{ 
             boxShadow: isOllamaConnected 

@@ -1,9 +1,9 @@
 # 🚀 Current Project State
 
 ## 📍 Активная задача
-- **Задача**: Phase 1 Complete — All Core Features Implemented
+- **Задача**: Agent Genesis — Autonomous Loop Working
 - **Субагент**: Executor
-- **Статус**: Ready for Phase 2
+- **Статус**: Phase 1 & 2 Complete — Ready for Phase 3
 
 ---
 
@@ -25,33 +25,53 @@
 - [x] Terminal flash fix
 - [x] Window size optimized (1600x900)
 
+### Phase 2 UI Shell ✅
+- [x] Layout: Sidebar + Main + Agent Panel
+- [x] Glassmorphism, Pure Black #000000
+- [x] Model Monitor Widget (VRAM display)
+- [x] NLP Terminal (K-интерфейс)
+- [x] Skill Core Browser
+- [x] Workspace Editor integration
+- [x] Sidebar icon centering (64px collapsed)
+- [x] Terminal auto-focus on Ctrl+`
+
+### Phase 3 AI Bridge (In Progress) 🟡
+- [x] Agent Engine (Rust) — `agent_engine.rs`
+- [x] Tool Executor: ls, read, grep
+- [x] Tool permission system (Auto/Confirm)
+- [x] First autonomous search test ✅ PASSED
+- [x] Build fixes (unused variable in SkillPanel)
+- [ ] Project Snapshot caching
+
 ### ADRs ✅
 - [x] ADR-006: System Prompt Injection & Shell
 - [x] ADR-007: Invisible Context (Proactive RAG)
 - [x] ADR-009: Fault-Tolerant State Management
 - [x] ADR-010: Real-time GPU Monitoring
+- [x] ADR-011: Aura-Claw Bridge (Proposed)
 
 ---
 
-## 📋 Phase 1 Summary
+## 📋 Phase Summary
 
-| Task | Status |
-|------|--------|
-| Tauri Commands bridge | ✅ |
-| SQLite plugin | ✅ |
-| Tables (ai_models_config, skill_core_index, project_index) | ✅ |
-| Ollama API integration | ✅ |
-| Model Router | ✅ |
-| Dynamic model assignments | ✅ |
-| RAM Calculation Fix | ✅ |
-| System Monitor Accordion | ✅ |
-| Real GPU Monitoring | ✅ |
-| Shell Integration | ✅ |
-| Invisible Context (RAG) | ✅ |
-| Identity System Prompt | ✅ |
-| Resizable Sidebar | ✅ |
-| Ollama Models Display | ✅ |
-| Terminal Stability | ✅ |
+| Phase | Status | Progress |
+|-------|--------|----------|
+| Phase 1: Foundation Core | ✅ Complete | 100% |
+| Phase 2: UI Shell | ✅ Complete | 100% |
+| Phase 3: AI Bridge | 🟡 In Progress | 60% |
+| Phase 4: QA & Verification | ⬜ Pending | 0% |
+
+---
+
+## 🤖 Agent Capabilities
+
+| Tool | Status | Permission |
+|------|--------|------------|
+| ls(path) | ✅ Working | Auto |
+| read(path) | ✅ Working | Auto |
+| grep(pattern) | ✅ Working | Auto |
+| write | 🔒 Ready (needs confirm) | Confirm |
+| terminal_cmd | 🔒 Ready (needs confirm) | Confirm |
 
 ---
 
@@ -61,6 +81,8 @@
 - `vault/sessions/2026-04-06_context-awareness.md` — Context RAG
 - `vault/sessions/2026-04-06_refactoring-fixes.md` — Refactoring & Bug Fixes
 - `vault/sessions/2026-04-06_ui-fixes-github.md` — UI Fixes & GitHub Push
+- `vault/sessions/agent-genesis-2026-04-06.md` — Agent Engine Created
+- `vault/sessions/agent-success-2026-04-06.md` — Acid Test Passed
 
 ---
 
@@ -68,6 +90,6 @@
 
 - **Repository**: https://github.com/Ackaron/AuraOS.git
 - **Branch**: main
-- **Last Commit**: `32ab4e2` — Fix: Direct DOM manipulation for smooth resizing
+- **Last Commit**: `agent-engine-v1` — Autonomous Agent Loop
 
 *Обновлено: 2026-04-06*

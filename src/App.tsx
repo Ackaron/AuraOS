@@ -158,23 +158,14 @@ function App() {
   }, [setModelStatus]);
 
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    
-    const setupListener = async () => {
-      const unlistenFn = await listen('toggle-terminal', () => {
-        toggleTerminal();
-      });
-      unlisten = unlistenFn;
-    };
-    
-    setupListener();
+    const unlistenPromise = listen('toggle-terminal', () => {
+      useAuraStore.getState().toggleTerminal();
+    });
     
     return () => {
-      if (unlisten) {
-        unlisten();
-      }
+      unlistenPromise.then(unlistenFn => unlistenFn());
     };
-  }, [toggleTerminal]);
+  }, []);
 
   return (
     <Layout
@@ -198,7 +189,7 @@ function App() {
             </div>
           </div>
           
-          <div className={`flex-1 flex flex-col overflow-hidden custom-scrollbar ${isSidebarCollapsed ? 'px-1' : ''}`}>
+          <div className={`flex-1 overflow-y-auto custom-scrollbar ${isSidebarCollapsed ? 'px-1' : ''}`}>
             <div className={`${isSidebarCollapsed ? 'py-2' : 'pb-2'}`}>
               <ModelMonitor isCollapsed={isSidebarCollapsed} />
             </div>
@@ -211,7 +202,7 @@ function App() {
               <SkillPanel isCollapsed={isSidebarCollapsed} />
             </div>
             {!isSidebarCollapsed && <div className="mx-4 border-t border-white/[0.06]" />}
-            <div className={`flex-1 overflow-y-auto ${isSidebarCollapsed ? 'py-2' : ''}`}>
+            <div className={`${isSidebarCollapsed ? 'py-2' : 'py-2'}`}>
               <ProjectPanel onFileDoubleClick={handleFileDoubleClick} isCollapsed={isSidebarCollapsed} />
             </div>
           </div>

@@ -59,6 +59,35 @@ export async function initDatabase(): Promise<Database> {
     console.warn('Table project_index may already exist:', e);
   }
   
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS available_skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL,
+        github_url TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {
+    console.warn('Table available_skills may already exist:', e);
+  }
+
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS project_skills (
+        project_id TEXT NOT NULL,
+        skill_id TEXT NOT NULL,
+        is_active INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, skill_id),
+        FOREIGN KEY (project_id) REFERENCES project_index(id) ON DELETE CASCADE,
+        FOREIGN KEY (skill_id) REFERENCES available_skills(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (e) {
+    console.warn('Table project_skills may already exist:', e);
+  }
+  
   return db;
 }
 
@@ -104,4 +133,46 @@ export async function getProjects(): Promise<{ id: string; name: string; path: s
 export async function deleteProject(id: string): Promise<void> {
   const database = await initDatabase();
   await database.execute(`DELETE FROM project_index WHERE id = ?`, [id]);
+}
+
+// --- Skill Management ---
+
+export async function addAvailableSkill(id: string, name: string, path: string, github_url?: string): Promise<void> {
+  const database = await initDatabase();
+  await database.execute(
+    `INSERT OR REPLACE INTO available_skills (id, name, path, github_url) VALUES (?, ?, ?, ?)`,
+    [id, name, path, github_url || null]
+  );
+}
+
+export async function getAvailableSkills(): Promise<{ id: string; name: string; path: string; github_url: string | null }[]> {
+  const database = await initDatabase();
+  return database.select(
+    `SELECT id, name, path, github_url FROM available_skills ORDER BY name ASC`
+  );
+}
+
+export async function deleteAvailableSkill(id: string): Promise<void> {
+  const database = await initDatabase();
+  await database.execute(`DELETE FROM available_skills WHERE id = ?`, [id]);
+}
+
+export async function toggleProjectSkill(projectId: string, skillId: string, isActive: boolean): Promise<void> {
+  const database = await initDatabase();
+  await database.execute(
+    `INSERT OR REPLACE INTO project_skills (project_id, skill_id, is_active) VALUES (?, ?, ?)`,
+    [projectId, skillId, isActive ? 1 : 0]
+  );
+}
+
+export async function getProjectSkills(projectId: string): Promise<{ skill_id: string; is_active: boolean }[]> {
+  const database = await initDatabase();
+  const rows = await database.select<{ skill_id: string; is_active: number }[]>(
+    `SELECT skill_id, is_active FROM project_skills WHERE project_id = ?`,
+    [projectId]
+  );
+  return rows.map(r => ({
+    skill_id: r.skill_id,
+    is_active: r.is_active === 1
+  }));
 }

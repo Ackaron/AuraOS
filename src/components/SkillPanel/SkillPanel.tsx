@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Plus, Tag, Check, Zap, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
-import { useAuraStore, type Skill } from '@/stores';
+import { FolderOpen, Plus, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useAuraStore } from '@/stores';
 import { cn } from '@/lib/utils';
 
 interface SkillPanelProps {
@@ -9,38 +9,96 @@ interface SkillPanelProps {
 }
 
 export function SkillPanel({ isCollapsed = false }: SkillPanelProps) {
-  const { skills, activateSkill } = useAuraStore();
-  const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
-  const [lastActivated, setLastActivated] = useState<string | null>(null);
+  const { 
+    activeProjectId,
+    isSkillCoreExpanded,
+    setSkillCoreExpanded
+  } = useAuraStore();
+  const [installedSkills, setInstalledSkills] = useState<{ id: string; name: string; path: string; github_url: string | null }[]>([]);
+  const [activeSkillIds, setActiveSkillIds] = useState<Set<string>>(new Set());
+  
+  const [isAddingSkill, setIsAddingSkill] = useState(false);
+  const [newSkillUrl, setNewSkillUrl] = useState('');
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
-  const handleSkillClick = async (skill: Skill) => {
-    if (expandedSkill === skill.id) {
-      setExpandedSkill(null);
-      return;
-    }
-    
-    activateSkill(skill.id);
-    setLastActivated(skill.id);
-    
+  // Load skills
+  const loadSkills = async () => {
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('add_skill', {
-        id: skill.id,
-        name: skill.name,
-        path: skill.path,
-        tags: skill.tags,
-      });
-    } catch (error) {
-      console.log('Skill selected:', skill.name);
+      const { getAvailableSkills, getProjectSkills } = await import('@/lib/database');
+      const skills = await getAvailableSkills();
+      setInstalledSkills(skills);
+
+      if (activeProjectId) {
+        const pSkills = await getProjectSkills(activeProjectId);
+        setActiveSkillIds(new Set(pSkills.filter(s => s.is_active).map(s => s.skill_id)));
+      } else {
+        setActiveSkillIds(new Set());
+      }
+    } catch (e) {
+      console.error('Failed to load skills:', e);
     }
   };
 
-  const activeSkill = skills.find(s => s.isActive);
-  const showSuccess = activeSkill !== undefined && lastActivated === activeSkill.id;
+  useEffect(() => {
+    loadSkills();
+    const interval = setInterval(loadSkills, 2000);
+    return () => clearInterval(interval);
+  }, [activeProjectId]);
+
+  const handleToggleSkill = async (skillId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeProjectId) return;
+    
+    const isCurrentlyActive = activeSkillIds.has(skillId);
+    const newState = !isCurrentlyActive;
+    
+    try {
+      const { toggleProjectSkill } = await import('@/lib/database');
+      await toggleProjectSkill(activeProjectId, skillId, newState);
+      
+      setActiveSkillIds(prev => {
+        const next = new Set(prev);
+        if (newState) next.add(skillId);
+        else next.delete(skillId);
+        return next;
+      });
+      
+      if (newState) {
+        const skill = installedSkills.find(s => s.id === skillId);
+        if (skill) {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('add_skill', {
+            id: skill.id,
+            name: skill.name,
+            path: skill.path,
+            tags: [],
+          }).catch(console.warn);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to toggle skill:', error);
+    }
+  };
+
+  const handleDeleteSkill = async (skillId: string, path: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('delete_plugin', { path });
+      
+      const { deleteAvailableSkill } = await import('@/lib/database');
+      await deleteAvailableSkill(skillId);
+      
+      loadSkills();
+    } catch (error) {
+      console.error('Failed to delete skill:', error);
+    }
+  };
 
   if (isCollapsed) {
     return (
-      <div className="flex flex-col items-center gap-3 py-2">
+      <div className="flex flex-col items-center justify-center gap-3 py-3">
         <Zap className="w-4 h-4 text-aura-accent" />
         <FolderOpen className="w-4 h-4 text-aura-muted" />
       </div>
@@ -48,159 +106,191 @@ export function SkillPanel({ isCollapsed = false }: SkillPanelProps) {
   }
 
   return (
-    <div className="p-4 space-y-4 flex-1 flex flex-col">
-      <div className="flex items-center justify-between">
+    <div className="px-4 py-2 space-y-4 flex flex-col">
+      <div 
+        className="flex items-center justify-between cursor-pointer group"
+        onClick={() => setSkillCoreExpanded(!isSkillCoreExpanded)}
+      >
         <div className="flex items-center gap-2">
-          <FolderOpen className="w-4 h-4 text-aura-accent" />
-          <span className="text-sm font-medium text-white/80 tracking-tight">
+          <FolderOpen className="w-4 h-4 text-aura-accent/80 group-hover:text-aura-accent transition-colors" />
+          <span className="text-sm font-medium text-white/60 tracking-tight group-hover:text-white/90 transition-colors">
             Skill Core
           </span>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5 text-aura-muted" />
-        </motion.button>
+        <div className="flex items-center gap-3">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsAddingSkill(!isAddingSkill);
+              setInstallError(null);
+              setNewSkillUrl('');
+            }}
+            className={cn(
+              "p-1 rounded-lg transition-colors",
+              isAddingSkill ? "bg-aura-accent/20 text-aura-accent" : "bg-white/5 hover:bg-white/10 text-aura-muted"
+            )}
+          >
+            <Plus className={cn("w-3.5 h-3.5 transition-transform", isAddingSkill && "rotate-45")} />
+          </motion.button>
+          
+          <div className="p-1 rounded-lg hover:bg-white/5 transition-colors">
+            {isSkillCoreExpanded ? (
+              <ChevronUp className="w-3.5 h-3.5 text-aura-muted" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 text-aura-muted" />
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-2 flex-1 overflow-y-auto">
-        <AnimatePresence mode="wait">
-          {showSuccess && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mb-2"
-            >
-              <div className="glass rounded-lg p-3 bg-emerald-500/10 border border-emerald-500/20">
-                <div className="flex items-center gap-2">
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ type: 'spring', stiffness: 400 }}
-                  >
-                    <Check className="w-4 h-4 text-emerald-400" />
-                  </motion.div>
-                  <span className="text-xs text-emerald-400 font-medium">
-                    Skill loaded to context
-                  </span>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {skills.map((skill, index) => (
+      <AnimatePresence>
+        {isSkillCoreExpanded && (
           <motion.div
-            key={skill.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              type: 'spring',
-              stiffness: 300,
-              damping: 30,
-              delay: index * 0.08,
-            }}
-            className="space-y-2"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="space-y-4 overflow-hidden"
           >
-            <div
-              onClick={() => handleSkillClick(skill)}
-            className={cn(
-                'glass rounded-xl p-4 cursor-pointer transition-all duration-200 group',
-                skill.isActive
-                  ? 'ring-1 ring-aura-accent/50 bg-aura-accent/5'
-                  : 'hover:bg-white/[0.06] hover:border-white/[0.1]'
-              )}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <motion.div 
-                    className="flex items-center gap-2"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <span className="text-sm font-medium text-white truncate">
-                      {skill.name}
-                    </span>
-                  </motion.div>
-                  <div className="text-[11px] text-aura-muted/70 truncate mt-1 font-mono">
-                    {skill.path}
-                  </div>
-                </div>
-                <motion.button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setExpandedSkill(expandedSkill === skill.id ? null : skill.id);
-                  }}
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  className="p-1 rounded-lg hover:bg-white/5 transition-colors"
-                >
-                  <ChevronRight 
-                    className={cn(
-                      'w-4 h-4 text-aura-muted transition-transform',
-                      expandedSkill === skill.id && 'rotate-90'
-                    )} 
-                  />
-                </motion.button>
-              </div>
-
-              <p className="text-[11px] text-aura-muted/60 mt-2 line-clamp-1">
-                {skill.description}
-              </p>
-
-              {skill.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  {skill.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono bg-white/5 rounded-full text-aura-muted/80 group-hover:text-aura-muted transition-colors"
-                    >
-                      <Tag className="w-2.5 h-2.5" />
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
+            {/* Add Skill Form */}
             <AnimatePresence>
-              {expandedSkill === skill.id && (
+              {isAddingSkill && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="pl-2 space-y-1"
+                  className="overflow-hidden"
                 >
-                  {skill.methods.map((method, mIndex) => (
-                    <motion.div
-                      key={method.name}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: mIndex * 0.05 }}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.02] hover:bg-white/[0.04] cursor-pointer group"
-                    >
-                      <Zap className="w-3 h-3 text-aura-accent/60" />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs text-white/80 block">
-                          {method.name}
-                        </span>
-                        <span className="text-[10px] text-aura-muted/60">
-                          {method.description}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono text-aura-accent/60 px-1.5 py-0.5 bg-aura-accent/10 rounded">
-                        {method.command}
+                  <form 
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!newSkillUrl || isInstalling) return;
+                      
+                      setIsInstalling(true);
+                      setInstallError(null);
+                      
+                      try {
+                        const url = newSkillUrl.trim();
+                        const fullUrl = url.startsWith('http') ? url : `https://github.com/${url.replace('obsidian@', '')}`;
+                        
+                        const { invoke } = await import('@tauri-apps/api/core');
+                        const result = await invoke<{ success: boolean; message: string; path: string }>('add_plugin', { 
+                          githubUrl: fullUrl 
+                        });
+                        
+                        let skillName = fullUrl.split('/').pop() || 'Unknown Skill';
+                        if (skillName.endsWith('.git')) skillName = skillName.slice(0, -4);
+
+                        if (result.success && result.path) {
+                          const { addAvailableSkill } = await import('@/lib/database');
+                          await addAvailableSkill(crypto.randomUUID(), skillName, result.path, fullUrl);
+                          await loadSkills();
+                          setIsAddingSkill(false);
+                          setNewSkillUrl('');
+                        } else {
+                          setInstallError(result.message);
+                        }
+                      } catch (err) {
+                        setInstallError(String(err));
+                      } finally {
+                        setIsInstalling(false);
+                      }
+                    }}
+                    className="flex flex-col gap-2 p-3 glass rounded-xl bg-white/[0.02]"
+                  >
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="github.com/user/repo"
+                      value={newSkillUrl}
+                      onChange={(e) => setNewSkillUrl(e.target.value)}
+                      disabled={isInstalling}
+                      className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-aura-accent/50"
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-red-400 max-w-[150px] truncate">
+                        {installError}
                       </span>
-                    </motion.div>
-                  ))}
+                      <button
+                        type="submit"
+                        disabled={isInstalling || !newSkillUrl}
+                        className="px-3 py-1 bg-aura-accent/20 hover:bg-aura-accent/30 text-aura-accent disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-[10px] font-medium transition-colors"
+                      >
+                        {isInstalling ? 'Installing...' : 'Install Skill'}
+                      </button>
+                    </div>
+                  </form>
                 </motion.div>
               )}
             </AnimatePresence>
+
+            <div className="space-y-2 pb-2">
+              {installedSkills.length === 0 ? (
+                <div className="text-center py-4">
+                  <p className="text-xs text-aura-muted/50">No skills installed.</p>
+                </div>
+              ) : (
+                installedSkills.map((skill, index) => {
+                  const isActive = activeSkillIds.has(skill.id);
+                  
+                  return (
+                    <motion.div
+                      key={skill.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className={cn(
+                        'glass rounded-xl p-3 cursor-pointer transition-all duration-200 group relative',
+                        isActive
+                          ? 'ring-1 ring-aura-accent/30 bg-aura-accent/5'
+                          : 'hover:bg-white/[0.04]'
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0 pr-2">
+                          <span className="text-sm font-medium text-white/90 block truncate">
+                            {skill.name}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-3">
+                          <div 
+                            onClick={(e) => handleToggleSkill(skill.id, e)}
+                            className={cn(
+                              "w-7 h-3.5 rounded-full flex items-center transition-all px-0.5 relative",
+                              isActive ? "bg-aura-accent/40" : "bg-white/10",
+                              !activeProjectId && "opacity-30 cursor-not-allowed"
+                            )}
+                          >
+                            <motion.div 
+                              layout 
+                              animate={{ x: isActive ? 12 : 0 }}
+                              className="w-2.5 h-2.5 rounded-full bg-white shadow-sm" 
+                            />
+                          </div>
+                          
+                          <motion.button
+                            onClick={(e) => handleDeleteSkill(skill.id, skill.path, e)}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            className="p-1 rounded text-aura-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </motion.button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })
+              )}
+            </div>
           </motion.div>
-        ))}
-      </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+// Ensure Trash2 is available (from lucide-react)
+import { Trash2 } from 'lucide-react';

@@ -3,9 +3,9 @@
 @import "tailwindcss";
 
 @theme {
-  --color-aura-black: #000000;
-  --color-aura-surface: #050505;
-  --color-aura-border: rgba(255, 255, 255, 0.06);
+  --color-aura-black: #0E0E11;     /* Deep Slate instead of pure black */
+  --color-aura-surface: #141419;   /* Soft dark neutral for panels */
+  --color-aura-border: rgba(255, 255, 255, 0.05); /* Softer borders */
   --color-aura-accent: #14b8a6;
   --color-aura-text: #e5e5e5;
   --color-aura-muted: #737373;
@@ -41,14 +41,28 @@
     @apply bg-zinc-800/50 rounded-full;
   }
 
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-zinc-700/70;
+  ::-webkit-scrollbar-thumb:hover  * {
+    @apply border-white/[0.06];
   }
+}
 
-  .custom-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
-  }
+/* Custom Scrollbar - Analytic Noir */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 @layer components {

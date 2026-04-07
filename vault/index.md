@@ -19,6 +19,7 @@ updated: 2026-03-20
 - **Chronology**: История работы и лог сессий, создаваемый командой `/save`.
 - **Context Recovery**: Позволяет быстро восстановить нить разработки после перерыва или переключения между задачами.
   - [[2026-04-05_initialization]] — Phase 0: Bootstrap + Layout Demo v1
+  - [[agent-genesis-phase3-2026-04-06]] — Phase 3: AI Bridge In Progress
 
 ## 🧩 [[Modules]]
 - **Code Documentation**: Техническое описание конкретных модулей, компонентов и интеграций.
