@@ -97,16 +97,22 @@ impl OllamaService {
         }
     }
 
-    pub async fn generate(&self, model: &str, system_prompt: &str, user_prompt: &str) -> Result<String, String> {
+    pub async fn generate(
+        &self,
+        model: &str,
+        messages: Vec<serde_json::Value>,
+    ) -> Result<String, String> {
         let client = reqwest::Client::new();
         
         let body = serde_json::json!({
             "model": model,
-            "messages": [
-                { "role": "system", "content": system_prompt },
-                { "role": "user", "content": user_prompt }
-            ],
-            "stream": false
+            "messages": messages,
+            "stream": false,
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 32768,
+                "num_predict": 2048
+            }
         });
 
         let response = client
@@ -145,8 +151,7 @@ impl OllamaService {
     pub async fn generate_streaming(
         &self,
         model: &str,
-        system_prompt: &str,
-        user_prompt: &str,
+        messages: Vec<serde_json::Value>,
         cancellation_token: Option<Arc<AtomicBool>>,
         on_chunk: impl Fn(String) + Send + 'static,
     ) -> Result<String, String> {
@@ -154,11 +159,13 @@ impl OllamaService {
         
         let body = serde_json::json!({
             "model": model,
-            "messages": [
-                { "role": "system", "content": system_prompt },
-                { "role": "user", "content": user_prompt }
-            ],
-            "stream": true
+            "messages": messages,
+            "stream": true,
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 32768,
+                "num_predict": 2048
+            }
         });
 
         let response = client
@@ -174,31 +181,43 @@ impl OllamaService {
 
         let mut full_response = String::new();
         let mut stream = response.bytes_stream();
-        
         use futures_util::StreamExt;
-        while let Some(item) = stream.next().await {
-            if let Some(ref token) = cancellation_token {
-                if token.load(Ordering::SeqCst) {
-                    log::info!("[OLLAMA] Streaming cancelled by token");
-                    break;
-                }
-            }
+        use std::time::Duration;
 
-            match item {
-                Ok(bytes) => {
-                    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                        for line in text.lines() {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-                                if let Some(chunk) = json.get("message").and_then(|m| m.get("content")).and_then(|v| v.as_str()) {
-                                    on_chunk(chunk.to_string());
-                                    full_response.push_str(chunk);
-                                }
-                            }
+        loop {
+            // Priority check for cancellation every 100ms or when a chunk arrives
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    if let Some(ref token) = cancellation_token {
+                        if token.load(Ordering::SeqCst) {
+                            log::info!("[OLLAMA] Streaming cancelled by watchdog");
+                            return Err("cancelled".to_string());
                         }
                     }
                 }
-                Err(e) => {
-                    log::warn!("Stream error: {}", e);
+                item = stream.next() => {
+                    match item {
+                        Some(Ok(bytes)) => {
+                            if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                                for line in text.lines() {
+                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                                        if let Some(chunk) = json.get("message").and_then(|m| m.get("content")).and_then(|v| v.as_str()) {
+                                            if let Some(ref token) = cancellation_token {
+                                              if token.load(Ordering::SeqCst) { return Err("cancelled".to_string()); }
+                                            }
+                                            on_chunk(chunk.to_string());
+                                            full_response.push_str(chunk);
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        Some(Err(e)) => {
+                            log::warn!("Stream error: {}", e);
+                            return Err(format!("Stream error: {}", e));
+                        },
+                        None => break, // Stream finished
+                    }
                 }
             }
         }

@@ -50,8 +50,8 @@ export function ProjectPanel({ onFileDoubleClick, isCollapsed = false }: Project
     try {
       const tree = await invoke<FileNode[]>('get_directory_tree', { path });
       setProjectFileTree(tree);
-    } catch (e) {
-      console.error('Failed to refresh tree:', e);
+    } catch {
+      console.error('Failed to refresh tree');
     }
   }, [setProjectFileTree]);
 
@@ -81,12 +81,12 @@ export function ProjectPanel({ onFileDoubleClick, isCollapsed = false }: Project
             status: 'active',
           });
         }
-      } catch (e) {
+      } catch {
         console.log('No projects in DB');
       }
     };
     loadProjects();
-  }, []);
+  }, [addProject]);
 
   const handleProjectClick = async (projectId: string, projectPath: string) => {
     if (expandedProjectId === projectId) {
@@ -107,8 +107,8 @@ export function ProjectPanel({ onFileDoubleClick, isCollapsed = false }: Project
       ]);
       setProjectFileTree(tree);
       setProjectContext(context);
-    } catch (e) {
-      console.error('Failed to load project:', e);
+    } catch {
+      console.error('Failed to load project');
       setProjectFileTree([]);
       setProjectContext('');
     } finally {
@@ -155,8 +155,8 @@ export function ProjectPanel({ onFileDoubleClick, isCollapsed = false }: Project
           handleProjectClick(latest.id, latest.path);
           if (!isProjectExpanded) setProjectExpanded(true);
         }
-      } catch (e) {
-        console.error('Failed to save project:', e);
+      } catch {
+        console.error('Failed to save project');
       }
     }
   };
@@ -166,8 +166,8 @@ export function ProjectPanel({ onFileDoubleClick, isCollapsed = false }: Project
     try {
       await deleteProjectDB(id);
       removeProject(id);
-    } catch (e) {
-      console.error('Failed to delete project:', e);
+    } catch {
+      console.error('Failed to delete project');
     }
   };
 
@@ -316,6 +316,10 @@ export function ProjectPanel({ onFileDoubleClick, isCollapsed = false }: Project
                                 <FileTree 
                                   tree={projectFileTree} 
                                   onFileClick={(p) => onFileDoubleClick?.(p)} 
+                                  onDirectoryClick={(p) => {
+                                    setTerminalCwd(p);
+                                    if (!isTerminalOpen) toggleTerminal();
+                                  }}
                                 />
                               )}
                             </div>

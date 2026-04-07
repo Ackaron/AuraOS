@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2, Plus, Square, Terminal as TerminalIcon } from 'lucide-react';
 import { useAuraStore } from '@/stores';
@@ -47,18 +47,69 @@ export function BottomTerminal({ isOpen, onClose }: BottomTerminalProps) {
   const [history, setHistory] = useState<Record<string, string[]>>({});
   const [historyIndex, setHistoryIndex] = useState<Record<string, number>>({});
 
+  const handleNewTerminal = useCallback(async () => {
+    const cwd = activeProjectPath || 'C:\\';
+    const id = addTerminalSession(cwd, 'Shell');
+    try {
+      await invoke('create_terminal_session', { id, cwd });
+      setSessionLines(prev => ({
+        ...prev,
+        [id]: [{
+          id: 'welcome',
+          type: 'output',
+          content: `🔒 Aura Shell connected.\nLocation: ${cwd}`,
+          timestamp: new Date(),
+        }]
+      }));
+    } catch (_e) {
+      console.error(_e);
+    }
+  }, [activeProjectPath, addTerminalSession]);
+
+  const handleCloseTerminal = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await invoke('close_terminal_session', { id });
+    removeTerminalSession(id);
+    setSessionLines(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const handleInterrupt = async () => {
+    if (!activeTerminalId) return;
+    try {
+      await invoke('interrupt_terminal_session', { id: activeTerminalId });
+      updateTerminalSession(activeTerminalId, { isRunning: false });
+      setSessionLines(prev => ({
+        ...prev,
+        [activeTerminalId]: [...(prev[activeTerminalId] || []), {
+          id: Date.now().toString(),
+          type: 'error',
+          content: '^C (Process interrupted)',
+          timestamp: new Date(),
+        }]
+      }));
+    } catch (_e) {
+      console.error(_e);
+    }
+  };
+
   useEffect(() => {
     setMounted(true);
     // Initialize first terminal if none exist
     if (terminalSessions.length === 0 && activeProjectPath) {
       handleNewTerminal();
     }
-  }, [activeProjectPath]);
+  }, [activeProjectPath, terminalSessions.length, handleNewTerminal]);
 
   // Dynamic Listeners for each session
   useEffect(() => {
+    const currentUnlistenRefs = unlistenRefs.current;
+    
     const setupSessionListeners = async (sessionId: string) => {
-      if (unlistenRefs.current[sessionId]) return;
+      if (currentUnlistenRefs[sessionId]) return;
 
       const { listen } = await import('@tauri-apps/api/event');
       
@@ -86,70 +137,21 @@ export function BottomTerminal({ isOpen, onClose }: BottomTerminalProps) {
         }));
       });
 
-      unlistenRefs.current[sessionId] = [un1, un2];
+      currentUnlistenRefs[sessionId] = [un1, un2];
     };
 
     terminalSessions.forEach(s => setupSessionListeners(s.id));
 
     return () => {
       // Cleanup unlisten refs for sessions that no longer exist
-      Object.keys(unlistenRefs.current).forEach(id => {
+      Object.keys(currentUnlistenRefs).forEach(id => {
         if (!terminalSessions.some(s => s.id === id)) {
-          unlistenRefs.current[id].forEach(u => u());
-          delete unlistenRefs.current[id];
+          currentUnlistenRefs[id].forEach(u => u());
+          delete currentUnlistenRefs[id];
         }
       });
     };
   }, [terminalSessions]);
-
-  const handleNewTerminal = async () => {
-    const cwd = activeProjectPath || 'C:\\';
-    const id = addTerminalSession(cwd, 'Shell');
-    try {
-      await invoke('create_terminal_session', { id, cwd });
-      setSessionLines(prev => ({
-        ...prev,
-        [id]: [{
-          id: 'welcome',
-          type: 'output',
-          content: `🔒 Aura Shell connected.\nLocation: ${cwd}`,
-          timestamp: new Date(),
-        }]
-      }));
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleCloseTerminal = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    await invoke('close_terminal_session', { id });
-    removeTerminalSession(id);
-    setSessionLines(prev => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  };
-
-  const handleInterrupt = async () => {
-    if (!activeTerminalId) return;
-    try {
-      await invoke('interrupt_terminal_session', { id: activeTerminalId });
-      updateTerminalSession(activeTerminalId, { isRunning: false });
-      setSessionLines(prev => ({
-        ...prev,
-        [activeTerminalId]: [...(prev[activeTerminalId] || []), {
-          id: Date.now().toString(),
-          type: 'error',
-          content: '^C (Process interrupted)',
-          timestamp: new Date(),
-        }]
-      }));
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   useEffect(() => {
     if (isOpen && mounted) {

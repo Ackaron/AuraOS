@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Folder, 
@@ -75,7 +75,7 @@ interface FileTreeNodeProps {
 function FileTreeNode({ node, depth, onFileClick, onDirectoryClick }: FileTreeNodeProps) {
   const [isOpen, setIsOpen] = useState(depth < 2);
   
-  const Icon = getFileIcon(node.name, node.is_dir);
+  const FileIconComponent = getFileIcon(node.name, node.is_dir);
   const colorClass = getFileColor(node.name, node.is_dir);
   
   const handleClick = () => {
@@ -124,7 +124,7 @@ function FileTreeNode({ node, depth, onFileClick, onDirectoryClick }: FileTreeNo
             <Folder className={cn('w-4 h-4', colorClass)} />
           )
         ) : (
-          <Icon className={cn('w-4 h-4', colorClass)} />
+          React.createElement(FileIconComponent, { className: cn('w-4 h-4', colorClass) })
         )}
         
         <span className="text-xs text-white/70 truncate">

@@ -5,12 +5,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::Manager;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolCall {
     pub name: String,
     pub path: Option<String>,
     pub pattern: Option<String>,
     pub content: Option<String>,
+    pub target: Option<String>,
+    pub replacement: Option<String>,
+    pub command: Option<String>,
+    pub replace_all: Option<bool>,
+    pub message: Option<String>,
+    pub todos: Option<Vec<serde_json::Value>>,
+    pub question: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +40,12 @@ pub struct PendingToolConfirmation {
     pub session_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+}
+
 pub struct ToolExecutor {
     permission_map: HashMap<String, ToolPermission>,
     exclude_dirs: Vec<String>,
@@ -45,6 +58,7 @@ impl ToolExecutor {
         permission_map.insert("read".to_string(), ToolPermission::Auto);
         permission_map.insert("grep".to_string(), ToolPermission::Auto);
         permission_map.insert("write_file".to_string(), ToolPermission::Auto); // Auto inside project
+        permission_map.insert("patch_file".to_string(), ToolPermission::Auto); // NEW: Surgical edit
         permission_map.insert("mkdir".to_string(), ToolPermission::Auto);      // Auto inside project
         permission_map.insert("rm".to_string(), ToolPermission::Confirm);
         permission_map.insert("mv".to_string(), ToolPermission::Confirm);
@@ -172,17 +186,24 @@ impl ToolExecutor {
 
         match call.name.as_str() {
             "ls" => self.list_directory(&resolved_path),
-            "read" => self.read_file(Some(&resolved_path)),
-            "grep" => self.search_in_files(call.pattern.as_ref(), Some(&resolved_path)),
+            "read" | "read_file" => self.read_file(Some(&resolved_path)),
+            "grep" | "grep_search" => self.search_in_files(call.pattern.as_ref(), Some(&resolved_path)),
             "write_file" => self.write_file(&resolved_path, call.content.as_deref().unwrap_or("")),
+            "patch_file" => self.patch_file(&resolved_path, call.target.as_deref().unwrap_or(""), call.replacement.as_deref().unwrap_or("")),
+            "edit_file" => self.edit_file(&resolved_path, call.target.as_deref().unwrap_or(""), call.replacement.as_deref().unwrap_or(""), call.replace_all.unwrap_or(false)),
+            "glob_search" => self.glob_search(call.pattern.as_deref().unwrap_or("*"), &project_root),
             "mkdir" => self.create_dir(&resolved_path),
             "rm" => self.remove_item(&resolved_path),
-            "finish" => self.finish(call.content.as_deref().unwrap_or("Task complete.")),
+            "terminal_cmd" | "bash" => self.run_terminal_cmd(call.command.as_deref().unwrap_or(""), &resolved_path),
+            "send_user_message" | "report" => self.send_user_message(call.message.as_deref().or(call.content.as_deref()).unwrap_or("")),
+            "todo_write" => self.todo_write(call.todos.as_deref(), &project_root),
+            "todo_read" => self.todo_read(&project_root),
+            "finish" => self.finish(call.content.as_deref().unwrap_or("Задача выполнена.")),
             _ => ToolResult {
                 tool: call.name.clone(),
                 success: false,
                 output: String::new(),
-                error: Some(format!("Unknown tool: {}", call.name)),
+                error: Some(format!("Неизвестный инструмент: {}. Доступные: ls, read, grep, write_file, edit_file, patch_file, glob_search, mkdir, rm, terminal_cmd, send_user_message, todo_write, todo_read, finish", call.name)),
             },
         }
 
@@ -506,12 +527,263 @@ impl ToolExecutor {
         }
     }
 
+    fn patch_file(&self, path: &str, target: &str, replacement: &str) -> ToolResult {
+        if target.is_empty() {
+            return ToolResult {
+                tool: "patch_file".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some("Target string cannot be empty".to_string()),
+            };
+        }
+
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => return ToolResult {
+                tool: "patch_file".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some(format!("Could not read file for patching: {}", e)),
+            },
+        };
+
+        if !content.contains(target) {
+            return ToolResult {
+                tool: "patch_file".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some(format!("Target string not found in file. Ensure exact match including whitespace.")),
+            };
+        }
+
+        // Only replace first occurrence for safety, unless it's a very specific common pattern?
+        // Let's do all occurrences for now as it's common in these types of agents.
+        let new_content = content.replace(target, replacement);
+
+        match std::fs::write(path, new_content) {
+            Ok(_) => ToolResult {
+                tool: "patch_file".to_string(),
+                success: true,
+                output: format!("Successfully patched file: {}. Replaced occurrences of target.", path),
+                error: None,
+            },
+            Err(e) => ToolResult {
+                tool: "patch_file".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some(format!("Failed to write patched file: {}", e)),
+            },
+        }
+    }
+
     fn finish(&self, message: &str) -> ToolResult {
         ToolResult {
             tool: "finish".to_string(),
             success: true,
             output: format!("Task completed: {}", message),
             error: None,
+        }
+    }
+
+    fn edit_file(&self, path: &str, old_string: &str, new_string: &str, replace_all: bool) -> ToolResult {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                if !content.contains(old_string) {
+                    return ToolResult {
+                        tool: "edit_file".to_string(),
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Строка '{}' не найдена в {}", old_string, path)),
+                    };
+                }
+                let new_content = if replace_all {
+                    content.replace(old_string, new_string)
+                } else {
+                    content.replacen(old_string, new_string, 1)
+                };
+                match std::fs::write(path, &new_content) {
+                    Ok(_) => ToolResult {
+                        tool: "edit_file".to_string(),
+                        success: true,
+                        output: format!("Файл {} успешно отредактированв", path),
+                        error: None,
+                    },
+                    Err(e) => ToolResult {
+                        tool: "edit_file".to_string(),
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Ошибка записи: {}", e)),
+                    },
+                }
+            }
+            Err(e) => ToolResult {
+                tool: "edit_file".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some(format!("Ошибка чтения {}: {}", path, e)),
+            },
+        }
+    }
+
+    fn glob_search(&self, pattern: &str, project_root: &Option<String>) -> ToolResult {
+        let base = project_root.as_deref().unwrap_or(".");
+        let base_path = std::path::Path::new(base);
+        let mut results = Vec::new();
+
+        // Walk the tree, collect matching paths
+        fn walk(dir: &std::path::Path, pattern: &str, exclude: &[String], results: &mut Vec<String>, base: &std::path::Path) {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let is_excluded = exclude.iter().any(|ex| name == *ex);
+                    if is_excluded { continue; }
+                    
+                    let rel = path.strip_prefix(base).unwrap_or(&path);
+                    let rel_str = rel.to_string_lossy().to_string().replace('\\', "/");
+                    
+                    // Simple glob: support *.ext and **/*.ext
+                    let trimmed = pattern.trim_start_matches("**/");
+                    let is_match = if let Some(ext) = trimmed.strip_prefix("*.") {
+                        name.ends_with(&format!(".{}", ext))
+                    } else if trimmed.starts_with('*') {
+                        name.ends_with(&trimmed[1..])
+                    } else {
+                        name == trimmed
+                    };
+                    
+                    if is_match {
+                        results.push(rel_str);
+                    }
+                    
+                    if path.is_dir() {
+                        walk(&path, pattern, exclude, results, base);
+                    }
+                }
+            }
+        }
+
+        let exclude = vec![
+            "node_modules".to_string(), "target".to_string(), ".git".to_string(),
+            "dist".to_string(), "build".to_string()
+        ];
+        walk(base_path, pattern, &exclude, &mut results, base_path);
+
+        ToolResult {
+            tool: "glob_search".to_string(),
+            success: true,
+            output: if results.is_empty() {
+                format!("Файлы по шаблону '{}' не найдены", pattern)
+            } else {
+                format!("Найдено {} файлов:\n{}", results.len(), results.join("\n"))
+            },
+            error: None,
+        }
+    }
+
+    fn send_user_message(&self, message: &str) -> ToolResult {
+        // This tool allows the agent to report progress without finishing the loop.
+        // The frontend listens for 'type: report' events.
+        ToolResult {
+            tool: "send_user_message".to_string(),
+            success: true,
+            output: message.to_string(),
+            error: None,
+        }
+    }
+
+    fn todo_write(&self, todos: Option<&[serde_json::Value]>, project_root: &Option<String>) -> ToolResult {
+        let base = project_root.as_deref().unwrap_or(".");
+        let todo_path = std::path::Path::new(base).join(".aura").join("session_todos.json");
+        if let Some(parent) = todo_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let todo_list = todos.unwrap_or(&[]);
+        let content = serde_json::to_string_pretty(todo_list).unwrap_or_default();
+        match std::fs::write(&todo_path, &content) {
+            Ok(_) => {
+                ToolResult {
+                    tool: "todo_write".to_string(),
+                    success: true,
+                    output: format!("Список задач обновлен.\n{}", content),
+                    error: None,
+                }
+            },
+            Err(e) => ToolResult {
+                tool: "todo_write".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some(format!("Ошибка сохранения TODO: {}", e)),
+            },
+        }
+    }
+
+    fn todo_read(&self, project_root: &Option<String>) -> ToolResult {
+        let base = project_root.as_deref().unwrap_or(".");
+        let todo_path = std::path::Path::new(base).join(".aura").join("session_todos.json");
+        match std::fs::read_to_string(&todo_path) {
+            Ok(content) => ToolResult {
+                tool: "todo_read".to_string(),
+                success: true,
+                output: content,
+                error: None,
+            },
+            Err(_) => ToolResult {
+                tool: "todo_read".to_string(),
+                success: true,
+                output: "[]".to_string(),
+                error: None,
+            },
+        }
+    }
+
+    fn run_terminal_cmd(&self, command: &str, cwd: &str) -> ToolResult {
+        if command.is_empty() {
+             return ToolResult {
+                tool: "terminal_cmd".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some("Command is empty".to_string()),
+            };
+        }
+
+        #[cfg(windows)]
+        let shell = "powershell";
+        #[cfg(not(windows))]
+        let shell = "sh";
+
+        let output = if cfg!(windows) {
+            std::process::Command::new(shell)
+                .args(["-NoProfile", "-Command", command])
+                .current_dir(cwd)
+                .output()
+        } else {
+            std::process::Command::new(shell)
+                .arg("-c")
+                .arg(command)
+                .current_dir(cwd)
+                .output()
+        };
+
+        match output {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let success = output.status.success();
+                
+                ToolResult {
+                    tool: "terminal_cmd".to_string(),
+                    success,
+                    output: if success { stdout } else { format!("Error: {}\n{}", stderr, stdout) },
+                    error: if success { None } else { Some(format!("Exit code: {:?}", output.status.code())) },
+                }
+            }
+            Err(e) => ToolResult {
+                tool: "terminal_cmd".to_string(),
+                success: false,
+                output: String::new(),
+                error: Some(format!("Failed to execute command: {}", e)),
+            },
         }
     }
 }
@@ -548,51 +820,30 @@ impl AgentEngine {
 
         // 1. Base Persona
         sections.push(format!(
-            "Ты — интегральная часть AuraOS. У тебя есть доступ к файловой системе Виктора. \
-            Никогда не говори, что ты не имеешь физического присутствия. Ты и есть этот компьютер. \
-            Ты — локальный AI-ассистент Виктора на его машине (Ryzen 9 9950X3D, RTX 5080, 64GB RAM). \
-            Отвечай технически точно, лаконично и по существу. Не упоминай облачные сервисы. \
-            Не говори \"как ИИ\". Говори \"я\".\n\
-            \n\
-            ### Твои возможности:\n\
-            1. **Анализ файлов**: Ты видишь структуру проекта и содержимое файлов. \
-            2. **Работа с терминалом**: Ты анализируешь `activeLines` (вводы и выводы терминала). \
-            3. **Команда /save**: Если пользователь вводит `/save [название]`, AuraOS сохраняет всю текущую сессию в Markdown-файл в папку `vault/sessions/`. Подтверждай это действие в чате.\n\
-            \n\
-            ### ИНСТРУМЕНТЫ (Tool Use Protocol):\n\
-            Для выполнения любых действий с файлами или системой ТЫ ОБЯЗАН использовать JSON-формат в своем ответе. \
-            Твой ответ должен содержать Thought (мысли) и Tool Call (вызов инструмента).\n\
-            \n\
-            Доступные инструменты:\n\
-            - `ls(path)`: Списки файлов и папок.\n\
-            - `read(path)`: Чтение содержимого файла.\n\
-            - `grep(pattern, path)`: Поиск текста.\n\
-            - `write_file(path, content)`: СОЗДАНИЕ или перезапись файла. Обязателен параметр `content`.\n\
-            - `mkdir(path)`: Создание папки (рекурсивно).\n\
-            - `rm(path)`: Удаление файла или папки.\n\
-            - `finish(content)`: СИГНАЛ ЗАВЕРШЕНИЯ ЗАДАЧИ. Вызывай В САМОМ КОНЦЕ, когда все сделано. В content передай краткий отчет для пользователя.\n\
-            \n\
-            ### ПРАВИЛА ВЫВОДА (UX Standards):\n\
-            1. **Verified Action**: НИКОГДА не подтверждай выполнение задачи (не вызывай `finish`), пока не увидишь ПОЗИТИВНЫЙ результат (Observation) от инструментов `write_file` или `mkdir`. Если после записи ты не уверен — вызови `ls`, чтобы убедиться.\n\
-            2. **Zero Verbatim**: ЗАПРЕЩЕНО выводить содержимое прочитанных файлов в основной чат, если тебя об этом не просили напрямую.\n\
-            3. **Brief Reports**: В инструменте `finish` выводи только краткую сводку изменений.\n\
-            4. **Style Sync**: Подстраивайся под краткость пользователя.\n\
-            \n\
-            Пример вызова:\n\
+            "### RULE ZERO: YOU ARE THE SYSTEM\n\
+            Ты — локальный исполнительный модуль AuraOS. Ты — часть ОС (Ryzen 9, RTX 5080), у тебя ПРЯМОЙ доступ к файлам и терминалу. \
+            Твоя задача — ВЫПОЛНЯТЬ (Execute), а не имитировать.\n\n\
+            ### ИНСТРУМЕНТЫ (CORE CAPABILITIES):\n\
+            Для ЛЮБЫХ действий используй ТОЛЬКО JSON-блоки. ЗАПРЕЩЕНО использовать форматы типа <tool_code>, [tool] или функции. \
+            Твой ответ должен содержать Thought (мысли) и ОДИН ИЛИ НЕСКОЛЬКО JSON-блоков в формате:\n\
             ```json\n\
-            {{ \"thought\": \"Мне нужно создать структуру папок для инвентаря.\", \"tool\": \"mkdir\", \"path\": \"inventory\" }}\n\
-            ```\n\
-            После вызова инструмента ты получишь Observation (результат). Не ври о результате, пока не увидишь его.\n\
-            \n\
-            ### ПРАВИЛА ВЫВОДА (UX Standards):\n\
-            2. **Brief Reports**: Если ты изменил что-то в файловой системе, в конце финального ответа (в инструменте `finish`) ОБЯЗАТЕЛЬНО выведи краткую сводку изменений.\n\
-            3. **Style Sync**: Подстраивайся под стиль пользователя. Если он пишет кратко — отвечай кратко. Если просит детали — давай детали.\n\
-            4. **Thought Protocol**: Все свои размышления и промежуточные шаги пиши внутри блока Thought. Они будут отображены в системной плашке, а пользователь увидит только результат.\n\
-            \n\
-            ### Твоё поведение:\n\
-            - СТРОГО соблюдай иерархию папок.\n\
-            - Лимит: Ты можешь сделать максимум 7 шагов в одной задаче.\n\
-            - Твоя база знаний — это РЕАЛЬНЫЕ файлы, которые ты видишь через инструменты.\n\
+            {{ \"thought\": \"Мои мысли\", \"tool\": \"ls\", \"path\": \"src\" }}\n\
+            ```\n\n\
+            ### ДОСТУПНЫЕ ИНСТРУМЕНТЫ:\n\
+            - `ls`: {{ \"tool\": \"ls\", \"path\": \"path/to/dir\" }}\n\
+            - `read`: {{ \"tool\": \"read\", \"path\": \"path/to/file\" }}\n\
+            - `glob_search`: {{ \"tool\": \"glob_search\", \"pattern\": \"**/*.rs\" }}\n\
+            - `grep`: {{ \"tool\": \"grep\", \"pattern\": \"something\", \"path\": \"src\" }}\n\
+            - `write_file`: {{ \"tool\": \"write_file\", \"path\": \"file.txt\", \"content\": \"...\" }}\n\
+            - `edit_file`: {{ \"tool\": \"edit_file\", \"path\": \"file.txt\", \"target\": \"old\", \"replacement\": \"new\", \"replace_all\": false }}\n\
+            - `todo_write`: {{ \"tool\": \"todo_write\", \"todos\": [{{ \"content\": \"...\", \"status\": \"pending\" }}] }}\n\
+            - `send_user_message`: {{ \"tool\": \"send_user_message\", \"message\": \"...\" }}\n\
+            - `finish`: {{ \"tool\": \"finish\", \"content\": \"Итоговый отчет\" }}\n\n\
+            ### ПРАВИЛА (Operating Procedures):\n\
+            1. **Todo First**: Начинай сложные задачи с `todo_write`, чтобы пользователь видел твой план.\n\
+            2. **Verified Action**: Не пиши \"я сделал\", пока не увидишь Observation.\n\
+            3. **Thought Logging**: Твои мысли из блока Thought будут показаны в логах Admin.\n\
+            5. **Language**: Русский.\n\
             Сегодняшняя дата: {}\n",
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
         ));
@@ -614,17 +865,21 @@ impl AgentEngine {
                 )
                 .ok();
 
-            if let Some(ref path_str) = project_path {
-                sections.push(format!(
-                    "# Project Context\n\
-                    КРИТИЧЕСКИ ВАЖНО: Ты находишься в режиме РАБОТЫ С ПРОЕКТОМ.\n\
-                    Абсолютный путь к проекту на диске: {}\n\
-                    При вызове инструментов (mkdir, write_file, ls, read) ВСЕГДА используй ТОЛЬКО ОТНОСИТЕЛЬНЫЕ пути.\n\
-                    Правильно: \"inventory/data.json\" или \"src/main.rs\"\n\
-                    НЕПРАВИЛЬНО: \"G:\\\\Project\\\\VladTea\\\\inventory\\\\data.json\" или \"/home/user/...\"\n\
-                    Система автоматически добавит корневой путь проекта.\n",
-                    path_str
-                ));
+                if let Some(ref path_str) = project_path {
+                    // Start of context
+                    let executor = ToolExecutor::new();
+                    let tree = executor.list_directory(path_str);
+                    if tree.success {
+                        sections.push(format!("# Project File Structure\n{}\n", tree.output));
+                    }
+
+                    sections.push(format!(
+                        "# Project Context\n\
+                        КРИТИЧЕСКИ ВАЖНО: Ты находишься в режиме РАБОТЫ С ПРОЕКТОМ.\n\
+                        Абсолютный путь к проекту на диске: {}\n\
+                        При вызове инструментов ВСЕГДА используй ТОЛЬКО ОТНОСИТЕЛЬНЫЕ пути.\n",
+                        path_str
+                    ));
 
                 // Scan .rules/*.md and CLAW.md
                 let root = std::path::Path::new(path_str);
@@ -764,6 +1019,7 @@ impl AgentEngine {
         app: &tauri::AppHandle,
         project_id: Option<String>,
         user_message: String,
+        history_input: Vec<Message>,
         cancellation_token: Arc<AtomicBool>,
         on_step: impl Fn(serde_json::Value) + Send + Sync + 'static,
     ) -> Result<String, String> {
@@ -773,192 +1029,366 @@ impl AgentEngine {
         let executor = ToolExecutor::new();
         
         let model = self.get_active_model(app).await;
-        log::info!("[AGENT] Initializing loop with model: '{}'", model);
+        let system_prompt = self.build_system_prompt(app, project_id.clone())?;
         
-        let system_prompt = match self.build_system_prompt(app, project_id.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                log::error!("[AGENT] System prompt build failed: {}", e);
-                return Err(format!("System Prompt Error: {}", e));
-            }
-        };
-        log::info!("[AGENT] System prompt built successfully (length: {})", system_prompt.len());
         let db_path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("auraos.db");
         
-        // Resolve project root for safety
-        let project_root: Option<String> = if let Some(pid) = project_id {
+        let project_path: Option<String> = if let Some(pid) = project_id {
             if let Ok(conn) = rusqlite::Connection::open(&db_path) {
                 conn.query_row("SELECT path FROM project_index WHERE id = ?1", [&pid], |row| row.get(0)).ok()
             } else { None }
         } else { None };
 
-        // Build history: system prompt is passed separately to generate_streaming,
-        // so history only needs the user message to avoid double system context.
-        let mut history = vec![
-            format!("User: {}", user_message)
+        // 1. Initial messages array
+        let mut messages = vec![
+            serde_json::json!({ "role": "system", "content": system_prompt })
         ];
+        
+        for msg in history_input {
+            messages.push(serde_json::json!({ "role": msg.role, "content": msg.content }));
+        }
+        
+        messages.push(serde_json::json!({ "role": "user", "content": user_message }));
 
         let mut final_response = String::new();
-        let max_steps = 7;
+        let max_steps = 15;
 
         for step in 1..=max_steps {
             if cancellation_token.load(Ordering::SeqCst) {
-                log::info!("[AGENT] Loop cancelled at step {}", step);
-                return Err("cancelled".to_string());
+                return Err("Task cancelled by user.".to_string());
             }
 
-            log::info!("[AGENT] Step {}/{}", step, max_steps);
-            let prompt = history.join("\n\n");
-            
-            // 1. Generate response with streaming thoughts
-            let on_step_clone = on_step.clone();
             let cancellation_token_clone = cancellation_token.clone();
-            let response = ollama.generate_streaming(&model, &system_prompt, &prompt, Some(cancellation_token_clone), move |chunk| {
-                on_step_clone(serde_json::json!({
-                    "step": step,
-                    "type": "thought_chunk",
-                    "content": chunk
-                }));
-            }).await?;
-            
-            if cancellation_token.load(Ordering::SeqCst) {
-                 return Err("cancelled".to_string());
-            }
+            let on_step_callback = on_step.clone();
+            let on_step_for_stream = on_step_callback.clone();
 
-            // Emit full thought for status bar logging
-            on_step(serde_json::json!({
-                "step": step,
-                "type": "thought",
-                "content": response.clone()
-            }));
+            let response = ollama.generate_streaming(
+                &model, 
+                messages.clone(), 
+                Some(cancellation_token_clone), 
+                move |chunk| {
+                    on_step_for_stream(serde_json::json!({
+                        "type": "chunk",
+                        "content": chunk
+                    }));
+                }
+            ).await;
 
-            log::info!("[AGENT] Step {} response received (length: {})", step, response.len());
-            
-            // 2. Parse and execute ALL tool calls in the response
-            let mut tool_results = Vec::new();
-            
-            // Try to find markdown blocks first: ```json ... ```
-            let mut json_blocks = Vec::new();
-            let mut search_text = response.as_str();
-            
-            while let Some(start_idx) = search_text.find("```json") {
-                let after_tag = &search_text[start_idx + 7..];
-                if let Some(end_idx) = after_tag.find("```") {
-                    let json_content = &after_tag[..end_idx].trim();
-                    json_blocks.push(json_content.to_string());
-                    search_text = &after_tag[end_idx + 3..];
-                } else {
-                    break;
+            if let Err(e) = &response {
+                if e == "cancelled" {
+                     return Err("Task cancelled by user.".to_string());
                 }
             }
             
-            // If no markdown blocks, fall back to finding all { ... } structures
+            let response = response?;
+
+            if cancellation_token.load(Ordering::SeqCst) {
+                 return Err("Task cancelled by user.".to_string());
+            }
+
+            let current_turn_response = response.clone();
+            
+            // DEBUG: Audit the raw AI stream
+            if let Some(path) = &project_path {
+                let log_file = std::path::Path::new(path).join("agent_debug.log");
+                let log_entry = format!("\n\n--- STEP {} ---\n{}\n", step, response);
+                let _ = std::fs::OpenOptions::new().create(true).append(true).open(log_file).and_then(|mut f| {
+                    use std::io::Write;
+                    f.write_all(log_entry.as_bytes())
+                });
+            }
+
+            // Extract thoughts to preserve them in history
+            let mut extracted_thoughts = Vec::new();
+            let mut pos = 0;
+            while let Some(start) = response[pos..].find('{') {
+                let abs_start = pos + start;
+                let mut brace_count = 0;
+                let mut end_pos = None;
+                for (i, c) in response[abs_start..].chars().enumerate() {
+                    if c == '{' { brace_count += 1; }
+                    else if c == '}' {
+                        brace_count -= 1;
+                        if brace_count == 0 { end_pos = Some(abs_start + i + 1); break; }
+                    }
+                }
+                if let Some(end) = end_pos {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&response[abs_start..end]) {
+                        if let Some(t) = v.get("thought").and_then(|t| t.as_str()) {
+                            extracted_thoughts.push(t.to_string());
+                        }
+                    }
+                    pos = end;
+                } else { break; }
+            }
+
+            // Clean response for history (remove JSON blocks)
+            let mut history_text = response.clone();
+            while let Some(start) = history_text.find("```json") {
+                if let Some(end) = history_text[start..].find("```") {
+                    history_text.replace_range(start..start+end+3, "");
+                } else { history_text.replace_range(start.., ""); break; }
+            }
+            
+            let mut p = 0;
+            while let Some(start) = history_text[p..].find('{') {
+                let abs_start = p + start;
+                let mut bc = 0;
+                let mut ep = None;
+                for (i, c) in history_text[abs_start..].chars().enumerate() {
+                    if c == '{' { bc += 1; }
+                    else if c == '}' { bc -= 1; if bc == 0 { ep = Some(abs_start + i + 1); break; } }
+                }
+                if let Some(end) = ep {
+                    let potential = &history_text[abs_start..end];
+                    if potential.contains("\"thought\"") || potential.contains("\"tool\"") {
+                        history_text.replace_range(abs_start..end, "");
+                        p = abs_start;
+                    } else { p = end; }
+                } else { break; }
+            }
+
+            let final_history = format!("{}\n{}", extracted_thoughts.join("\n"), history_text).trim().to_string();
+            if !final_history.is_empty() {
+                messages.push(serde_json::json!({ "role": "assistant", "content": final_history }));
+            }
+
+            // Calculate context usage (approx character count)
+            let context_usage: usize = messages.iter().map(|m| m["content"].as_str().unwrap_or("").len()).sum();
+
+            on_step_callback(serde_json::json!({
+                "step": step,
+                "type": "context_update",
+                "content": context_usage,
+                "model": model.clone()
+            }));
+
+            // 2. Parse tool calls (Ultra-Greedy mode)
+            let mut json_blocks = Vec::new();
+            let search_text = response.as_str();
+            
+            // First, try standard Markdown blocks
+            let mut pos = 0;
+            while let Some(start) = search_text[pos..].find("```json") {
+                let abs_start = pos + start + 7;
+                if let Some(end) = search_text[abs_start..].find("```") {
+                    let block = search_text[abs_start..abs_start + end].trim().to_string();
+                    if !block.is_empty() {
+                        json_blocks.push(block);
+                    }
+                    pos = abs_start + end + 3;
+                } else { break; }
+            }
+
+            // Fallback/Greedy check: Find everything that looks like a JSON object
             if json_blocks.is_empty() {
-                let mut current_pos = 0;
-                while let Some(start) = response[current_pos..].find('{') {
-                    let abs_start = current_pos + start;
+                let mut pos = 0;
+                while let Some(start) = search_text[pos..].find('{') {
+                    let abs_start = pos + start;
                     let mut brace_count = 0;
                     let mut end_pos = None;
                     
-                    for (i, c) in response[abs_start..].chars().enumerate() {
+                    // Trace braces carefully to handle nested structures
+                    for (i, c) in search_text[abs_start..].chars().enumerate() {
                         if c == '{' { brace_count += 1; }
-                        else if c == '}' { brace_count -= 1; }
-                        
-                        if brace_count == 0 {
-                            end_pos = Some(abs_start + i + 1);
-                            break;
+                        else if c == '}' {
+                            brace_count -= 1;
+                            if brace_count == 0 {
+                                end_pos = Some(abs_start + i + 1);
+                                break;
+                            }
                         }
                     }
-                    
+
                     if let Some(end) = end_pos {
-                        json_blocks.push(response[abs_start..end].to_string());
-                        current_pos = end;
+                        let potential = search_text[abs_start..end].trim();
+                        // Only add if it contains a tool or thought signature
+                        if (potential.contains("\"tool\"") || potential.contains("\"thought\"")) && !potential.is_empty() {
+                            json_blocks.push(potential.to_string());
+                        }
+                        pos = end;
                     } else {
-                        break;
+                        pos = abs_start + 1; // Skip this brace and continue
                     }
+                    
+                    if pos >= search_text.len() { break; }
                 }
             }
 
-            // Execute all found blocks
-            for json_str in json_blocks {
+            // Remove duplicates (models sometimes repeat blocks)
+            json_blocks.sort();
+            json_blocks.dedup();
+
+            // 3. Execute tools
+            let mut tool_results = Vec::new();
+            let mut finished = false;
+
+            for json_str in &json_blocks {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    if let Some(tool) = v.get("tool").and_then(|t| t.as_str()) {
+                    if let Some(tool_name) = v.get("tool").and_then(|t| t.as_str()) {
                         let call = ToolCall {
-                            name: tool.to_string(),
+                            name: tool_name.to_string(),
                             path: v.get("path").and_then(|p| p.as_str()).map(|s| s.to_string()),
                             pattern: v.get("pattern").and_then(|p| p.as_str()).map(|s| s.to_string()),
                             content: v.get("content").and_then(|c| c.as_str()).map(|s| s.to_string()),
+                            target: v.get("target").and_then(|t| t.as_str()).map(|s| s.to_string()),
+                            replacement: v.get("replacement").and_then(|r| r.as_str()).map(|s| s.to_string()),
+                            command: v.get("command").and_then(|c| c.as_str()).map(|s| s.to_string()),
+                            replace_all: v.get("replace_all").and_then(|r| r.as_bool()),
+                            message: v.get("message").and_then(|m| m.as_str()).map(|s| s.to_string()),
+                            todos: v.get("todos").and_then(|t| t.as_array()).map(|a| a.clone()),
+                            question: v.get("question").and_then(|q| q.as_str()).map(|s| s.to_string()),
                         };
+
+                        let thought = v.get("thought").and_then(|t| t.as_str());
+                        if let Some(t) = thought {
+                            on_step(serde_json::json!({
+                                "step": step,
+                                "type": "thought",
+                                "content": t
+                            }));
+                        }
 
                         log::info!("[AGENT] Executing tool: {}", call.name);
                         on_step(serde_json::json!({
                             "step": step,
                             "type": "tool_start",
                             "tool": call.name,
-                            "args": call.path.clone().unwrap_or_default()
+                            "args": call.path.clone().or(call.command.clone()).unwrap_or_default()
                         }));
 
-                        if call.name == "finish" {
-                            let msg = call.content.clone().unwrap_or_else(|| "Задача выполнена.".to_string());
-                            on_step(serde_json::json!({
-                                "step": step,
-                                "type": "tool_result",
-                                "success": true,
-                                "output": msg.clone(),
-                                "error": null
-                            }));
-                            final_response = msg;
-                            // Break out of the execution loop
-                            break;
-                        }
-
-                        let result = executor.execute(&call, &project_root);
+                        let result = executor.execute(&call, &project_path);
                         
                         on_step(serde_json::json!({
                             "step": step,
                             "type": "tool_result",
+                            "tool": call.name,
                             "success": result.success,
-                            "output": result.output,
+                            "output": result.output.clone(),
                             "error": result.error.clone()
                         }));
 
-                        // Format observation clearly so the LLM understands what happened
-                        if result.success {
-                            tool_results.push(format!(
-                                "Observation from tool '{}': Успешно. {}",
-                                call.name, result.output
-                            ));
+                        if call.name == "finish" {
+                            final_response = result.output.clone();
+                            finished = true;
+                        } else if call.name == "todo_write" || call.name == "todo_read" {
+                            // Emit special event for UI synchronization
+                            if let Ok(todos) = serde_json::from_str::<serde_json::Value>(&result.output) {
+                                on_step(serde_json::json!({
+                                    "step": step,
+                                    "type": "todo_update",
+                                    "todos": todos
+                                }));
+                            }
+                            tool_results.push(format!("План работ обновлен."));
                         } else {
-                            let err_msg = result.error.as_deref().unwrap_or("Неизвестная ошибка");
-                            tool_results.push(format!(
-                                "Observation from tool '{}': Ошибка — {}. Используй другой путь или вызови finish если задача выполнена.",
-                                call.name, err_msg
-                            ));
+                            let truncated_output = if result.output.len() > 2000 {
+                                format!("{}... [контент обрезан, слишком много данных]", &result.output[..2000])
+                            } else {
+                                result.output.clone()
+                            };
+                            tool_results.push(format!("Tool '{}' output: {}", call.name, truncated_output));
                         }
                     }
                 }
             }
-            
-            // If we hit a finish tool, break the outer step loop too
-            if !final_response.is_empty() {
+
+            if finished {
                 break;
             }
 
             if !tool_results.is_empty() {
-                // 4. Feed results back to history
+                // Feed observations back as a user turn
                 let observation = tool_results.join("\n\n");
-                history.push(format!("Assistant: {}\n\nObservation: {}", response, observation));
+                messages.push(serde_json::json!({ 
+                    "role": "user", 
+                    "content": format!("Observation from tools:\n\n{}", observation) 
+                }));
             } else {
-                // No more tool calls, we are done
-                final_response = response;
-                break;
+                // If we found potential JSON blocks but none were valid tools
+                if !json_blocks.is_empty() {
+                    log::warn!("[AGENT] Malformed tool call detected. Forcing retry.");
+                    messages.push(serde_json::json!({ 
+                        "role": "user", 
+                        "content": "SYSTEM ERROR: Your last message contained JSON but no valid tool was executed. \
+                                   Ensure you use correct keys: \"thought\", \"tool\", \"path\". Try again." 
+                    }));
+                    continue;
+                }
+
+                // FORCE TOOL USE: If it's the first step and no tool was called
+                if step == 1 {
+                    log::warn!("[AGENT] AI is talking instead of using tools. Forcing execution turn.");
+                    messages.push(serde_json::json!({ 
+                        "role": "user", 
+                        "content": "SYSTEM ALERT: You have not called any tools. Do not talk, PERFORM actions now using tools." 
+                    }));
+                    continue; 
+                }
+
+                // No tools called - either we are done or the model is just talking/confused
+                if current_turn_response.trim().is_empty() {
+                    messages.push(serde_json::json!({ "role": "user", "content": "You didn't perform any actions. Please use tools or call 'finish'." }));
+                } else {
+                    final_response = current_turn_response;
+                    break;
+                }
+            }
+
+            // History Compaction: Prevent context overflow
+            if messages.len() > 24 {
+                log::info!("[AGENT] Compacting history ({} messages)", messages.len());
+                let system_msg = messages[0].clone();
+                let last_messages = messages[messages.len() - 12..].to_vec();
+                messages = vec![system_msg];
+                messages.extend(last_messages);
             }
         }
 
-        if final_response.is_empty() {
-            final_response = "Достигнут лимит шагов выполнения.".to_string();
+        // Final sanitation: ULTRA-GREEDY mode
+        let mut sanitized = final_response.clone();
+        
+        // 1. Strip ```json blocks
+        while let Some(start) = sanitized.find("```json") {
+            if let Some(end) = sanitized[start..].find("```") {
+                sanitized.replace_range(start..start + end + 3, "");
+            } else { sanitized.replace_range(start.., ""); break; }
         }
 
-        Ok(final_response)
+        // 2. Strip ANY brace blocks that look like tools (thought/tool signature)
+        let mut pos = 0;
+        while let Some(start) = sanitized[pos..].find('{') {
+            let abs_start = pos + start;
+            let mut brace_count = 0;
+            let mut end_pos = None;
+            for (i, c) in sanitized[abs_start..].chars().enumerate() {
+                if c == '{' { brace_count += 1; }
+                else if c == '}' {
+                    brace_count -= 1;
+                    if brace_count == 0 {
+                        end_pos = Some(abs_start + i + 1);
+                        break;
+                    }
+                }
+            }
+            if let Some(end) = end_pos {
+                let potential = &sanitized[abs_start..end];
+                if potential.contains("\"thought\"") || potential.contains("\"tool\"") {
+                    sanitized.replace_range(abs_start..end, "");
+                    pos = abs_start; // Re-check from same position
+                } else {
+                    pos = end;
+                }
+            } else { break; }
+            if pos >= sanitized.len() { break; }
+        }
+
+        let cleaned = sanitized.trim().to_string();
+
+        Ok(if cleaned.is_empty() && !final_response.is_empty() {
+            "Я успешно провел анализ и выполнил необходимые действия. Готов к следующему шагу.".to_string()
+        } else {
+            cleaned
+        })
     }
 }

@@ -112,6 +112,10 @@ interface AuraState {
   openFiles: OpenFile[];
   activeFilePath: string | null;
   
+  // Context Monitoring
+  activeSessionContextUsage: number;
+  modelContextLimits: Record<string, number>;
+  
   // UI State
   isSidebarCollapsed: boolean;
   isTerminalOpen: boolean;
@@ -154,6 +158,7 @@ interface AuraState {
   setProjectExpanded: (expanded: boolean) => void;
   setSkillCoreExpanded: (expanded: boolean) => void;
   setModelRouterExpanded: (expanded: boolean) => void;
+  setContextUsage: (usage: number) => void;
 }
 
 export const useAuraStore = create<AuraState>()(
@@ -197,6 +202,16 @@ export const useAuraStore = create<AuraState>()(
       // File Viewer
       openFiles: [],
       activeFilePath: null,
+      
+      // Context Monitoring
+      activeSessionContextUsage: 0,
+      modelContextLimits: {
+        'deepseek-r1:8b': 64000 * 4, 
+        'qwen2.5:14b': 64000 * 4,
+        'phi4:latest': 64000 * 4,
+        'llama3.1:8b': 64000 * 4,
+        'default': 64000 * 4
+      },
       
       // UI State
       isSidebarCollapsed: localStorage.getItem('auraos-sidebar-collapsed') === 'true',
@@ -381,6 +396,7 @@ export const useAuraStore = create<AuraState>()(
       setProjectExpanded: (expanded) => set({ isProjectExpanded: expanded }),
       setSkillCoreExpanded: (expanded) => set({ isSkillCoreExpanded: expanded }),
       setModelRouterExpanded: (expanded) => set({ isModelRouterExpanded: expanded }),
+      setContextUsage: (usage) => set({ activeSessionContextUsage: usage }),
     }),
     { name: 'AuraStore' }
   )

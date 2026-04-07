@@ -1,4 +1,4 @@
-import { readFile, mkdir, writeFile, cp, access, readdir } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, cp, access } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -77,7 +77,7 @@ export async function loadPlatformConfig(aiType: string): Promise<PlatformConfig
 export async function loadAllPlatformConfigs(): Promise<Map<string, PlatformConfig>> {
   const configs = new Map<string, PlatformConfig>();
 
-  for (const [aiType, platformName] of Object.entries(AI_TO_PLATFORM)) {
+  for (const [aiType] of Object.entries(AI_TO_PLATFORM)) {
     try {
       const config = await loadPlatformConfig(aiType);
       configs.set(aiType, config);

@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import prompts from 'prompts';
 import type { AIType } from '../types/index.js';
-import { AI_TYPES, AI_FOLDERS } from '../types/index.js';
+import { AI_FOLDERS } from '../types/index.js';
 import { detectAIType, getAITypeDescription } from '../utils/detect.js';
 import { logger } from '../utils/logger.js';
 

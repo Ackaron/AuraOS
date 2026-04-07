@@ -57,8 +57,8 @@ function App() {
         language: getLanguage(name),
       };
       openFile(file);
-    } catch (e) {
-      console.error('Error opening file:', e);
+    } catch (_e) {
+      console.error('Error opening file:', _e);
     }
   };
 
@@ -74,13 +74,13 @@ function App() {
         for (const [taskType, modelName] of Object.entries(assignments)) {
           setModelForTask(taskType as TaskType, modelName);
         }
-      } catch (e) {
-        console.log('DB init skipped:', e);
+      } catch (_e) {
+        console.log('DB init skipped:', _e);
       }
     };
     
     initApp();
-  }, []);
+  }, [setModelForTask]);
 
   useEffect(() => {
     const checkOllama = async () => {
@@ -130,7 +130,7 @@ function App() {
       clearInterval(interval);
       unlistenStats.then((fn) => fn());
     };
-  }, [setOllamaConnection, setModelStatus, setSystemStats]);
+  }, [setOllamaConnection, setModelStatus, setSystemStats, setAvailableModels]);
 
   useEffect(() => {
     const fetchModels = async () => {

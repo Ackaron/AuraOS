@@ -17,6 +17,7 @@
         "height": 900,
         "resizable": true,
         "fullscreen": false,
+        "maximized": true,
         "minWidth": 1024,
         "minHeight": 600
       }

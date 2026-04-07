@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Plus, Zap, ChevronDown, ChevronUp } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { FolderOpen, Plus, Zap, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuraStore } from '@/stores';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +23,7 @@ export function SkillPanel({ isCollapsed = false }: SkillPanelProps) {
   const [installError, setInstallError] = useState<string | null>(null);
 
   // Load skills
-  const loadSkills = async () => {
+  const loadSkills = useCallback(async () => {
     try {
       const { getAvailableSkills, getProjectSkills } = await import('@/lib/database');
       const skills = await getAvailableSkills();
@@ -35,16 +35,16 @@ export function SkillPanel({ isCollapsed = false }: SkillPanelProps) {
       } else {
         setActiveSkillIds(new Set());
       }
-    } catch (e) {
-      console.error('Failed to load skills:', e);
+    } catch (_e) {
+      console.error('Failed to load skills:', _e);
     }
-  };
+  }, [activeProjectId]);
 
   useEffect(() => {
     loadSkills();
     const interval = setInterval(loadSkills, 2000);
     return () => clearInterval(interval);
-  }, [activeProjectId]);
+  }, [loadSkills]);
 
   const handleToggleSkill = async (skillId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -291,6 +291,3 @@ export function SkillPanel({ isCollapsed = false }: SkillPanelProps) {
     </div>
   );
 }
-
-// Ensure Trash2 is available (from lucide-react)
-import { Trash2 } from 'lucide-react';

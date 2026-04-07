@@ -5,6 +5,16 @@ import { useAuraStore } from '@/stores';
 import { cn } from '@/lib/utils';
 import { invoke } from '@tauri-apps/api/core';
 
+interface AgentStepPayload {
+  type: string;
+  content: string;
+  tool?: string;
+  args?: string;
+  success?: boolean;
+  output?: string;
+  todos?: any[];
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -21,15 +31,23 @@ export function AgentPanel() {
   const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
   const [terminalInput, setTerminalInput] = useState('');
   const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
-  const [processLogs, setProcessLogs] = useState<{type: string, content: string, timestamp: Date}[]>([]);
+  const [processLogs, setProcessLogs] = useState<{type: string, content: string, timestamp: Date, success?: boolean}[]>([]);
+  const [todos, setTodos] = useState<{content: string, status: string}[]>([]);
   const [isLogExpanded, setIsLogExpanded] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [streamingChars, setStreamingChars] = useState(0);
   
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const terminalInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const { modelRouter, currentTaskType, activeProjectId, activeProjectPath } = useAuraStore();
+  const { 
+    modelRouter, 
+    currentTaskType, 
+    activeProjectId, 
+    activeProjectPath,
+    setContextUsage,
+  } = useAuraStore();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -93,6 +111,8 @@ export function AgentPanel() {
         content: '🛑 Termination signal sent...',
         timestamp: new Date()
       }]);
+      setIsProcessing(false);
+      setAgentSessionId(null);
     } catch (e) {
       console.error('Failed to stop agent:', e);
     }
@@ -118,6 +138,7 @@ export function AgentPanel() {
     const promptValue = input.trim();
     setInput('');
     setIsProcessing(true);
+    setStreamingChars(0);
 
     try {
       const assistantId = (Date.now() + 1).toString();
@@ -128,23 +149,38 @@ export function AgentPanel() {
         timestamp: new Date(),
       };
       
-      setMessages((prev) => [...prev, assistantMessage]);
+    setMessages((prev) => [...prev, assistantMessage]);
+    setTodos([]); 
 
       const { listen } = await import('@tauri-apps/api/event');
-      const unlisten = await listen<any>('agent-step', (event) => {
+      const unlisten = await listen<AgentStepPayload>('agent-step', (event) => {
         const { type, content, tool, args, success, output } = event.payload;
         
-        if (type === 'thought' || type === 'tool_start' || type === 'tool_result') {
+        if (type === 'thought' || type === 'tool_start' || type === 'tool_result' || type === 'chunk' || type === 'todo_update') {
            let logText = '';
-           if (type === 'thought') logText = `🤔 ${content.replace(/```json[\s\S]*?```/g, '').trim()}`;
+           if (type === 'thought') logText = `🤔 ${content? content.replace(/```json[\s\S]*?```/g, '').trim() : 'Analyzing...'}`;
            if (type === 'tool_start') logText = `🔧 Executing ${tool}(${args || ''})...`;
            if (type === 'tool_result') logText = success ? `✅ ${tool} complete.` : `❌ ${tool} failed: ${output}`;
+           if (type === 'todo_update') {
+              logText = `📋 Mission Roadmap Updated.`;
+              if (event.payload.todos) {
+                 setTodos(event.payload.todos);
+              } else if (content) {
+                 try {
+                   const parsed = JSON.parse(content);
+                   setTodos(Array.isArray(parsed) ? parsed : []);
+                 } catch (e) {
+                   console.warn('Failed to parse todos:', e);
+                 }
+              }
+           }
            
            if (logText) {
              setProcessLogs(prev => [...prev, {
                type,
                content: logText,
-               timestamp: new Date()
+               timestamp: new Date(),
+               success: type === 'tool_result' ? success : undefined
              }]);
            }
         }
@@ -154,19 +190,40 @@ export function AgentPanel() {
             if (msg.id !== assistantId) return msg;
             
             let newContent = msg.content;
-            if (type === 'tool_result' && tool === 'finish') {
+            
+            if (type === 'chunk' && content) {
+                setStreamingChars(prev => prev + content.length);
+                return msg; 
+            } else if (type === 'tool_result' && tool === 'finish') {
                 newContent = output || content;
             } else if (type === 'finish_step') {
                 newContent = content;
+            } else if (type === 'todo_update' || (type === 'tool_result' && (tool === 'todo_write' || tool === 'todo_read'))) {
+                if (output && output.startsWith('[')) {
+                    try { setTodos(JSON.parse(output)); } catch {}
+                }
+            } else if (type === 'context_update') {
+                if (typeof content === 'number') {
+                    setContextUsage(content);
+                }
+            } else if (type === 'thought') {
+                return msg;
+            } else if (type === 'tool_result' && (tool === 'send_user_message' || tool === 'report')) {
+                // This is the ONLY place where we inject progress into the chat bubble
+                if (success && output) {
+                   const reportPrefix = newContent ? '\n\n' : '';
+                   newContent += `${reportPrefix}📌 **PROGESS:** ${output}`;
+                }
             }
             
-            return { ...msg, content: newContent };
+            return { ...msg, content: newContent.trim() };
           })
         );
       });
 
       const finalResult = await invoke<string>('run_reactive_agent', {
         prompt: promptValue,
+        history: messages.map(m => ({ role: m.role, content: m.content })),
         projectId: activeProjectId,
         sessionId: sessionId,
       });
@@ -313,7 +370,9 @@ export function AgentPanel() {
                   <div className="flex items-center justify-between bg-white/[0.03] border border-white/[0.06] rounded-xl px-3 py-2">
                     <div className="flex items-center gap-2 text-xs text-aura-muted">
                       <Loader2 className="w-3 h-3 animate-spin text-aura-accent" />
-                      <span className="font-medium">Synthesizing Implementation...</span>
+                      <span className="font-medium">
+                        {streamingChars > 0 ? `Thinking (${streamingChars} chars generated)...` : 'Synthesizing Implementation...'}
+                      </span>
                     </div>
                     <button 
                       onClick={() => setIsLogExpanded(!isLogExpanded)}
@@ -323,19 +382,61 @@ export function AgentPanel() {
                     </button>
                   </div>
 
-                  {isLogExpanded && processLogs.length > 0 && (
+                  {isLogExpanded && (processLogs.length > 0 || todos.length > 0) && (
                     <motion.div
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       className="bg-white/[0.01] border border-white/5 rounded-xl overflow-hidden"
                     >
-                      <div className="max-h-52 overflow-y-auto p-2.5 space-y-2 font-mono text-[10px]">
+                      {/* Thoughts are now strictly internal logs */}
+
+                      {todos.length > 0 && (
+                        <div className="p-3 border-b border-white/5 bg-aura-accent/5">
+                          <div className="text-[10px] uppercase tracking-widest text-aura-accent font-bold mb-2 flex items-center gap-2">
+                             <Shield className="w-3 h-3" />
+                             AURA GSD ROADMAP
+                          </div>
+                          <div className="space-y-1.5">
+                            {todos.map((todo, idx) => (
+                              <div key={idx} className="flex items-start gap-2 text-[10px] font-mono">
+                                <div className={cn(
+                                  "w-3 h-3 rounded border flex items-center justify-center shrink-0 mt-0.5",
+                                  todo.status === 'completed' ? "bg-aura-accent border-aura-accent" : "border-white/20"
+                                )}>
+                                  {todo.status === 'completed' && <Check className="w-2 h-2 text-black" />}
+                                  {todo.status === 'in_progress' && <div className="w-1.5 h-1.5 bg-aura-accent animate-pulse rounded-full" />}
+                                </div>
+                                <span className={cn(
+                                  todo.status === 'completed' ? "text-aura-accent/60 line-through" : 
+                                  todo.status === 'in_progress' ? "text-white" : "text-aura-muted/40"
+                                )}>
+                                  {todo.content}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="max-h-52 overflow-y-auto p-3 space-y-2 font-mono scrollbar-hide bg-black/10">
                         {processLogs.map((log, i) => (
-                          <div key={i} className="flex gap-2.5 text-aura-muted/60 animate-in fade-in slide-in-from-left-1 duration-300">
-                            <span className="text-aura-accent/30 shrink-0 select-none">
+                          <div key={i} className="flex gap-2.5 text-[10px] animate-in fade-in slide-in-from-left-1 duration-300">
+                            <span className="text-white/20 shrink-0 text-[8px] mt-0.5">
                               {log.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
                             </span>
-                            <span className="break-words leading-relaxed">{log.content}</span>
+                            <span className="shrink-0 flex items-center justify-center w-4">
+                              {log.type === 'thought' ? '🧠' : 
+                               log.type === 'tool_start' ? '🔧' : 
+                               log.type === 'tool_result' ? (log.success === false ? '❌' : '✅') : 
+                               log.type === 'system' ? '🔔' : '📌'}
+                            </span>
+                            <span className={cn(
+                              "break-words leading-relaxed",
+                              log.type === 'thought' ? "text-aura-muted/40 italic font-light" : 
+                              log.success === false ? "text-red-400/70" : "text-white/60"
+                            )}>
+                              {log.content}
+                            </span>
                           </div>
                         ))}
                       </div>

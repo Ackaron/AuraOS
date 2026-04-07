@@ -143,7 +143,11 @@ async fn run_inference(
         agent.build_system_prompt(&app, project_id)?
     };
 
-    ollama.generate(&model, &system_prompt, &prompt).await
+    let messages = vec![
+        serde_json::json!({ "role": "system", "content": system_prompt }),
+        serde_json::json!({ "role": "user", "content": prompt })
+    ];
+    ollama.generate(&model, messages).await
 }
 
 #[tauri::command]
@@ -166,7 +170,11 @@ async fn run_inference_streaming(
     };
     
     let app_handle = app.clone();
-    let _result = ollama.generate_streaming(&model, &system_prompt, &prompt, None, move |chunk| {
+    let messages = vec![
+        serde_json::json!({ "role": "system", "content": system_prompt }),
+        serde_json::json!({ "role": "user", "content": prompt })
+    ];
+    let _result = ollama.generate_streaming(&model, messages, None, move |chunk| {
         let _ = app_handle.emit("inference-chunk", chunk);
     }).await?;
     
@@ -178,6 +186,7 @@ async fn run_reactive_agent(
     state: State<'_, AppState>,
     app: AppHandle,
     prompt: String,
+    history: Vec<modules::agent_engine::Message>,
     project_id: Option<String>,
     session_id: String,
 ) -> Result<String, String> {
@@ -191,7 +200,7 @@ async fn run_reactive_agent(
     }
 
     let app_handle = app.clone();
-    let result = agent.run_loop(&app, project_id, prompt, cancel_token.clone(), move |step_data| {
+    let result = agent.run_loop(&app, project_id, prompt, history, cancel_token.clone(), move |step_data| {
         let _ = app_handle.emit("agent-step", step_data);
     }).await;
 
@@ -215,13 +224,14 @@ fn stop_reactive_agent(state: State<AppState>, session_id: String) -> Result<(),
 }
 
 #[tauri::command]
-async fn save_terminal_session(content: String, name: String) -> Result<String, String> {
-    let base_path = "G:\\Project\\AuraOS\\vault\\sessions";
-    std::fs::create_dir_all(base_path).map_err(|e| e.to_string())?;
+async fn save_terminal_session(app: AppHandle, content: String, name: String) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let base_path = app_dir.join("vault").join("sessions");
+    std::fs::create_dir_all(&base_path).map_err(|e| e.to_string())?;
     
     let now = chrono::Local::now();
     let filename = format!("{}_{}.md", now.format("%Y-%m-%d"), name.replace(" ", "_"));
-    let full_path = std::path::Path::new(base_path).join(&filename);
+    let full_path = base_path.join(&filename);
     
     std::fs::write(&full_path, content).map_err(|e| e.to_string())?;
     
@@ -421,19 +431,23 @@ async fn run_autonomous_agent(
     
     let ollama = OllamaService::new();
     let executor = ToolExecutor::new();
+    // max_steps is handled by the loop in reactive mode, autonomous mode is currently one-shot
     
     let mut system_prompt = String::from(
-        "Ты — автономный агент AuraOS. Ты можешь самостоятельно использовать инструменты для выполнения задач. \
-        Когда тебе нужно получить информацию о файлах или директориях, ты МОЖЕШЬ вызвать инструмент. \
+        "Ты — автономный ассистент AuraOS. Ты можешь самостоятельно использовать инструменты для выполнения задач в IDE. \
         Отвечай технически точно и лаконично.\n\n\
         Доступные инструменты:\n\
-        - ls(path) — показать содержимое директории\n\
-        - read(path) — прочитать содержимое файла\n\
-        - grep(pattern, path) — поиск по файлам\n\n\
-        Если тебе нужно узнать содержимое директории или файла, ответь JSON-ом:\n\
-        {{\"tool\": \"ls\", \"path\": \".\"}}\n\
+        - `ls(path)`: Списки файлов и папок.\n\
+        - `read(path)`: Чтение содержимого файла.\n\
+        - `grep(pattern, path)`: Поиск текста.\n\
+        - `write_file(path, content)`: СОЗДАНИЕ или ПОЛНАЯ ПЕРЕЗАПИСЬ файла.\n\
+        - `patch_file(path, target, replacement)`: Редактирование файла. Заменяет `target` на `replacement`.\n\
+        - `mkdir(path)`: Создание папки (рекурсивно).\n\
+        - `rm(path)`: Удаление файла или папки.\n\n\
+        Если тебе нужно вызвать инструмент, ответь JSON-ом:\n\
+        {\"tool\": \"write_file\", \"path\": \"src/main.rs\", \"content\": \"...\"}\n\
         или\n\
-        {{\"tool\": \"read\", \"path\": \"путь/к/файлу\"}}\n\n\
+        {\"tool\": \"patch_file\", \"path\": \"src/App.tsx\", \"target\": \"old\", \"replacement\": \"new\"}\n\n\
         Иначе просто ответь на вопрос пользователя.\n\n"
     );
     
@@ -444,10 +458,13 @@ async fn run_autonomous_agent(
     }
     
     log::info!("[AGENT] Thought: {}", prompt);
+    let messages = vec![
+        serde_json::json!({ "role": "system", "content": system_prompt }),
+        serde_json::json!({ "role": "user", "content": prompt })
+    ];
     let response: String = ollama.generate(
         &model.unwrap_or_else(|| "llama3.1:8b".to_string()), 
-        &system_prompt, 
-        &prompt
+        messages
     ).await?;
     log::info!("[AGENT] Response received, parsing tool calls...");
     
@@ -460,6 +477,10 @@ async fn run_autonomous_agent(
                     path: json.get("path").and_then(|v| v.as_str()).map(|s| s.to_string()),
                     pattern: json.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string()),
                     content: json.get("content").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    target: json.get("target").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    replacement: json.get("replacement").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    command: json.get("command").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    ..Default::default()
                 });
             }
         }
@@ -495,6 +516,10 @@ fn execute_tool(name: String, path: Option<String>, pattern: Option<String>, pro
         path,
         pattern,
         content: None,
+        target: None,
+        replacement: None,
+        command: None,
+        ..Default::default()
     };
     Ok(executor.execute(&call, &project_root))
 }
@@ -658,8 +683,8 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
-            let window = app.get_webview_window("main").unwrap();
-            let _ = window.set_fullscreen(true);
+            let _window = app.get_webview_window("main").unwrap();
+            // Window is maximized via tauri.conf.json
 
             let mut monitor = Monitor::new();
             monitor.set_app_handle(app.handle().clone());
