@@ -8,5 +8,6 @@ export type {
   TaskType,
   ModelConfig,
   FileNode,
-  OpenFile
+  OpenFile,
+  DiscoveredAgent
 } from './auraStore';

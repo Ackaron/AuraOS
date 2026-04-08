@@ -47,23 +47,40 @@ impl AgentRegistry {
         let mut discovered = Vec::new();
 
         if !agents_dir.exists() {
+            log::warn!("[AGENT] Agents directory does not exist: {:?}", agents_dir);
             return Ok(discovered);
         }
 
+        log::info!("[AGENT] Scanning directory: {:?}", agents_dir);
         let entries = fs::read_dir(agents_dir).map_err(|e| e.to_string())?;
 
         for entry in entries.flatten() {
             let path = entry.path();
+            log::info!("[AGENT] Checking file: {:?}", path);
             if path.is_file() {
                 if let Some(ext) = path.extension() {
+                    log::info!("[AGENT] Extension: {:?}", ext);
                     if ext == "md" {
-                        if let Ok(definition) = self.parse_agent_file(&path) {
-                            discovered.push(definition);
+                        log::info!("[AGENT] Parsing MD file: {:?}", path);
+                        match self.parse_agent_file(&path) {
+                            Ok(definition) => {
+                                log::info!(
+                                    "[AGENT] SUCCESS: {} - {:?}",
+                                    definition.name,
+                                    definition.role
+                                );
+                                discovered.push(definition);
+                            }
+                            Err(e) => {
+                                log::error!("[AGENT] Parse error for {:?}: {}", path, e);
+                            }
                         }
                     }
                 }
             }
         }
+
+        log::info!("[AGENT] Total discovered: {}", discovered.len());
 
         // Update internal state
         let mut agents = self.agents.write().map_err(|e| e.to_string())?;
@@ -78,14 +95,15 @@ impl AgentRegistry {
     fn parse_agent_file(&self, path: &PathBuf) -> Result<AgentDefinition, String> {
         let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
 
+        // name = filename without extension (e.g., "planner", "executor")
         let name = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .to_string();
 
-        // Parse markdown for role information
-        let mut role = String::new();
+        // Role = name (the filename itself)
+        let role = name.clone();
         let mut description = String::new();
         let mut goals = Vec::new();
         let mut rules = Vec::new();
@@ -120,24 +138,16 @@ impl AgentRegistry {
             }
         }
 
-        // Extract description from first paragraph
+        // Extract description from first Goals line
         for line in content.lines() {
             let trimmed = line.trim();
-            if !trimmed.is_empty() && !trimmed.starts_with('#') && !trimmed.starts_with("##") {
-                description = trimmed.to_string();
+            if trimmed.starts_with("- **") {
+                description = trimmed
+                    .trim_start_matches("- **")
+                    .trim_end_matches("**")
+                    .to_string();
                 break;
             }
-        }
-
-        // Try to extract role type from content
-        if content.contains("Planner") || content.contains("strategist") {
-            role = "planner".to_string();
-        } else if content.contains("Executor") || content.contains("Design Engineer") {
-            role = "executor".to_string();
-        } else if content.contains("Verifier") || content.contains("Quality Guard") {
-            role = "verifier".to_string();
-        } else {
-            role = name.clone();
         }
 
         Ok(AgentDefinition {

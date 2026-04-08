@@ -6,3 +6,4 @@ export { ProjectPanel } from './ProjectPanel';
 export { ModelRouterPanel } from './ModelRouterPanel';
 export { FileViewer } from './FileViewer';
 export { AgentPanel } from './AgentPanel';
+export { SessionsPanel } from './SessionsPanel';

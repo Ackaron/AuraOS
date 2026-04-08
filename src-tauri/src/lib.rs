@@ -653,10 +653,51 @@ fn get_available_skills() -> Result<Vec<modules::SkillMetadata>, String> {
     Ok(skills)
 }
 
+fn find_project_root() -> std::path::PathBuf {
+    let mut path = std::env::current_dir().unwrap_or_default();
+    for _ in 0..10 {
+        if path.join(".claude").exists() {
+            return path.clone();
+        }
+        if !path.pop() {
+            break;
+        }
+    }
+    std::env::current_dir().unwrap_or_default()
+}
+
 #[tauri::command]
 fn get_discovered_agents(state: State<AppState>) -> Result<Vec<modules::AgentDefinition>, String> {
-    let registry = state.agent_registry.lock().map_err(|e| e.to_string())?;
-    registry.get_agents()
+    log::info!("[CMD] get_discovered_agents called");
+    
+    let mut registry = state.agent_registry.lock().map_err(|e| e.to_string())?;
+    
+    // Use project root, not current dir
+    let project_root = find_project_root();
+    log::info!("[CMD] Project root: {:?}", project_root);
+    
+    let agents_path = project_root.join(".claude").join("agents");
+    log::info!("[CMD] Agents path: {:?}", agents_path);
+    
+    if agents_path.exists() {
+        log::info!("[CMD] Scanning from: {:?}", agents_path);
+        match registry.scan_agents(&agents_path) {
+            Ok(agents) => {
+                log::info!("[CMD] Returning {} agents", agents.len());
+                return Ok(agents);
+            }
+            Err(e) => {
+                log::error!("[CMD] Scan error: {}", e);
+            }
+        }
+    } else {
+        log::warn!("[CMD] Agents dir not found: {:?}", agents_path);
+    }
+    
+    // Fallback
+    let agents = registry.get_agents()?;
+    log::info!("[CMD] Returning {} agents", agents.len());
+    Ok(agents)
 }
 
 #[tauri::command]
@@ -669,16 +710,13 @@ fn get_agent_prompt(state: State<AppState>, name: String) -> Result<String, Stri
 fn refresh_agent_registry(state: State<AppState>) -> Result<Vec<modules::AgentDefinition>, String> {
     let mut registry = state.agent_registry.lock().map_err(|e| e.to_string())?;
     
-    if let Ok(current_dir) = std::env::current_dir() {
-        let agents_path = current_dir.join(".claude").join("agents");
-        if agents_path.exists() {
-            log::info!("[AGENT] Refreshing agents from: {:?}", agents_path);
-            registry.scan_agents(&agents_path)
-        } else {
-            Err("Agents directory does not exist".to_string())
-        }
+    let project_root = find_project_root();
+    let agents_path = project_root.join(".claude").join("agents");
+    if agents_path.exists() {
+        log::info!("[AGENT] Refreshing agents from: {:?}", agents_path);
+        registry.scan_agents(&agents_path)
     } else {
-        Err("Could not determine current directory".to_string())
+        Err("Agents directory does not exist".to_string())
     }
 }
 
@@ -910,19 +948,24 @@ pub fn run() {
             let mcp_client = McpClient::new();
             let context_manager = ContextManager::new(64000); // 64k default context
             
-            // Scan .claude/agents/ and .claude/commands/ directories
-            if let Ok(current_dir) = std::env::current_dir() {
-                let agents_path = current_dir.join(".claude").join("agents");
-                if agents_path.exists() {
-                    log::info!("[AGENT] Scanning agents from: {:?}", agents_path);
-                    let _ = agent_registry.scan_agents(&agents_path);
-                }
-                
-                let commands_path = current_dir.join(".claude").join("commands");
-                if commands_path.exists() {
-                    log::info!("[COMMAND] Scanning commands from: {:?}", commands_path);
-                    let _ = command_registry.scan_commands(&commands_path);
-                }
+            // Scan .claude/agents/ and .claude/commands/ directories using project root
+            let project_root = find_project_root();
+            log::info!("[SETUP] Project root: {:?}", project_root);
+            
+            let agents_path = project_root.join(".claude").join("agents");
+            log::info!("[SETUP] Checking agents at: {:?}", agents_path);
+            log::info!("[SETUP] Agents exists: {}", agents_path.exists());
+            if agents_path.exists() {
+                log::info!("[AGENT] Scanning agents from: {:?}", agents_path);
+                let _ = agent_registry.scan_agents(&agents_path);
+            } else {
+                log::warn!("[AGENT] Agents directory NOT FOUND at: {:?}", agents_path);
+            }
+            
+            let commands_path = project_root.join(".claude").join("commands");
+            if commands_path.exists() {
+                log::info!("[COMMAND] Scanning commands from: {:?}", commands_path);
+                let _ = command_registry.scan_commands(&commands_path);
             }
 
             app.manage(AppState {

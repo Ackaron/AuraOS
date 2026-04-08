@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Layout, ModelMonitor, SkillPanel, ProjectPanel, ModelRouterPanel, FileViewer, AgentPanel } from '@/components';
+import { Layout, ModelMonitor, SkillPanel, ProjectPanel, ModelRouterPanel, FileViewer, AgentPanel, SessionsPanel } from '@/components';
 import { BottomTerminal } from '@/components/Terminal/BottomTerminal';
 import { useAuraStore, type TaskType, type OpenFile } from '@/stores';
 import { listen } from '@tauri-apps/api/event';
@@ -25,7 +25,9 @@ function App() {
     openFile, 
     isSidebarCollapsed, 
     toggleTerminal,
-    isTerminalOpen
+    isTerminalOpen,
+    setDiscoveredAgents,
+    setCurrentTaskType
   } = useAuraStore();
 
   const getLanguage = (filename: string): string => {
@@ -62,17 +64,39 @@ function App() {
     }
   };
 
-  useEffect(() => {
+useEffect(() => {
     const initApp = async () => {
       try {
         await initDatabase();
         console.log('Database initialized');
         
+        // Load model assignments
         const assignments = await getModelAssignments();
-        console.log('Loaded assignments:', assignments);
-        
         for (const [taskType, modelName] of Object.entries(assignments)) {
           setModelForTask(taskType as TaskType, modelName);
+        }
+        
+        // Load discovered agents from .claude/agents/
+        try {
+          console.log('[APP] Before invoke get_discovered_agents...');
+          const agents = await invoke<Array<{
+            name: string;
+            role: string;
+            description: string;
+            goals: string[];
+            rules: string[];
+            capabilities: string[];
+          }>>('get_discovered_agents');
+          
+          console.log('[APP] Agents loaded:', agents);
+          setDiscoveredAgents(agents);
+          
+          // Set first agent as current task type
+          if (agents.length > 0) {
+            setCurrentTaskType(agents[0].name);
+          }
+        } catch (agentError) {
+          console.log('[APP] Agent discovery FAILED:', agentError);
         }
       } catch (_e) {
         console.log('DB init skipped:', _e);
@@ -80,7 +104,7 @@ function App() {
     };
     
     initApp();
-  }, [setModelForTask]);
+  }, [setModelForTask, setDiscoveredAgents, setCurrentTaskType]);
 
   useEffect(() => {
     const checkOllama = async () => {
@@ -204,6 +228,10 @@ function App() {
             {!isSidebarCollapsed && <div className="mx-4 border-t border-white/[0.06]" />}
             <div className={`${isSidebarCollapsed ? 'py-2' : 'py-2'}`}>
               <ProjectPanel onFileDoubleClick={handleFileDoubleClick} isCollapsed={isSidebarCollapsed} />
+            </div>
+            {!isSidebarCollapsed && <div className="mx-4 border-t border-white/[0.06]" />}
+            <div className={`${isSidebarCollapsed ? 'py-2' : 'py-2'}`}>
+              <SessionsPanel isCollapsed={isSidebarCollapsed} />
             </div>
           </div>
 

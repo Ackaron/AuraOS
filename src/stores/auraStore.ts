@@ -9,7 +9,16 @@ export interface ModelStatus {
   isActive: boolean;
 }
 
-export type TaskType = 'logic' | 'code' | 'docs' | 'fast';
+export type TaskType = 'logic' | 'code' | 'docs' | 'fast' | string;
+
+export interface DiscoveredAgent {
+  name: string;
+  role: string;
+  description: string;
+  goals: string[];
+  rules: string[];
+  capabilities: string[];
+}
 
 export interface ModelConfig {
   id: number;
@@ -109,8 +118,9 @@ interface AuraState {
   systemStats: SystemStats;
   
   // Model Router
-  modelRouter: Record<TaskType, string>;
-  currentTaskType: TaskType;
+  modelRouter: Record<string, string>;
+  currentTaskType: string;
+  discoveredAgents: DiscoveredAgent[];
   
   // Ollama
   availableModels: string[];
@@ -162,7 +172,8 @@ interface AuraState {
   removeProject: (projectId: string) => void;
   updateProjectStatus: (projectId: string, status: 'active' | 'paused' | 'completed') => void;
   setModelForTask: (taskType: TaskType, modelName: string) => void;
-  setCurrentTaskType: (taskType: TaskType) => void;
+  setCurrentTaskType: (taskType: string) => void;
+  setDiscoveredAgents: (agents: DiscoveredAgent[]) => void;
   setAvailableModels: (models: string[]) => void;
   setActiveProject: (projectId: string, projectPath: string) => void;
   setProjectFileTree: (tree: FileNode[]) => void;
@@ -220,6 +231,7 @@ export const useAuraStore = create<AuraState>()(
         fast: 'llama3.1:8b',
       },
       currentTaskType: 'code',
+      discoveredAgents: [],
       availableModels: [],
       
       activeProjectPath: null,
@@ -329,6 +341,7 @@ export const useAuraStore = create<AuraState>()(
       },
 
       setCurrentTaskType: (taskType) => set({ currentTaskType: taskType }),
+  setDiscoveredAgents: (agents: DiscoveredAgent[]) => set({ discoveredAgents: agents }),
       setAvailableModels: (models) => set({ availableModels: models }),
       
       setActiveProject: (projectId, projectPath) => set({ 

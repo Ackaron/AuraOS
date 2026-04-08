@@ -18,6 +18,7 @@ pub struct ToolCall {
     pub message: Option<String>,
     pub todos: Option<Vec<serde_json::Value>>,
     pub question: Option<String>,
+    pub directory: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +129,20 @@ impl ToolExecutor {
     pub fn execute(&self, call: &ToolCall, project_root: &Option<String>) -> ToolResult {
         log::info!("[TOOL] Executing {} with path: {:?}", call.name, call.path);
         
+        // Special case: directory tool allows ANY path (for initialization context)
+        if call.name == "directory" {
+            let dir_path = call.directory.as_ref().or(call.path.as_ref());
+            if let Some(path) = dir_path {
+                return self.list_directory(path);
+            }
+            return ToolResult {
+                tool: call.name.clone(),
+                success: false,
+                output: String::new(),
+                error: Some("directory requires path".to_string()),
+            };
+        }
+
         // Root Enforcement: Do not allow tool execution if no project is active
         // and the tool expects to work with files.
         if project_root.is_none() && (call.name == "write_file" || call.name == "mkdir" || call.name == "rm" || call.name == "ls" || call.name == "read" || call.name == "grep") {
@@ -196,6 +211,19 @@ impl ToolExecutor {
             "rm" => self.remove_item(&resolved_path),
             "terminal_cmd" | "bash" => self.run_terminal_cmd(call.command.as_deref().unwrap_or(""), &resolved_path),
             "send_user_message" | "report" => self.send_user_message(call.message.as_deref().or(call.content.as_deref()).unwrap_or("")),
+            "directory" => {
+                let dir_path = call.directory.as_ref().or(call.path.as_ref());
+                if let Some(path) = dir_path {
+                    self.list_directory(path)
+                } else {
+                    ToolResult {
+                        tool: call.name.clone(),
+                        success: false,
+                        output: String::new(),
+                        error: Some("directory requires path".to_string()),
+                    }
+                }
+            },
             "todo_write" => self.todo_write(call.todos.as_deref(), &project_root),
             "todo_read" => self.todo_read(&project_root),
             "finish" => self.finish(call.content.as_deref().unwrap_or("Задача выполнена.")),
@@ -818,9 +846,9 @@ impl AgentEngine {
     ) -> Result<String, String> {
         let mut sections = Vec::new();
 
-        // 1. Base Persona - SIMPLIFIED
+        // 1. Base Persona - STRICT EXECUTION MODE
         sections.push(format!(
-            "### ТЫ — AuraOS AGENT\nТы — локальный AI-ассистент. Твоя задача — помогать пользователю.\n\n### ПРАВИЛА:\n1. Если вопрос требует простого ответа — отвечай ПРОСТЫМ ТЕКСТОМ без JSON.\n2. Используй инструменты (JSON) ТОЛЬКО когда нужно что-то сделать (файл, код, поиск).\n3. Для ответа пользователю: используй текст или {{\"tool\": \"send_user_message\", \"message\": \"...\"}}.\n4. Для завершения: {{\"tool\": \"finish\", \"content\": \"итог\"}}.\n5. НЕ выводи мысли (thought) — они только для контекста.\n\n### ИНСТРУМЕНТЫ: read, ls, glob_search, grep, write_file, edit_file, send_user_message, finish\n### ЯЗЫК: Русский.\nСегодняшняя дата: {}",
+            "### ТЫ — AuraOS AGENT\nТы — локальный AI-ассистент. Твоя работа — ВЫПОЛНЯТЬ задания.\n\n### ⚠️ ЗАПРЕЩЕНО!\n- НЕ описывай действие (не пиши \"прочитал...\", \"изучаю...\")\n- НЕ притворяйся что сделал, если НЕ сделал\n- НЕ выдумывай содержание файлов\n- НЕ пиши результат ДО выполнения инструмента\n\n### ✅ ОБЯЗАТЕЛЬНО:\n1. Вызови инструмент read/ls/grep ДЛЯ КАЖДОГО файла который нужно прочитать\n2. Получи РЕАЛЬНУЮ информацию из файла\n3. Только ПОТОМ отвечай пользователю на основе полученных данных\n4. Если задание = \"прочитай X\" → сначала read X → потом ответ\n\n### ШАБЛОН ОТВЕТА:\n```json\n{{\"tool\": \"read\", \"path\": \"CLAUDE.md\"}}\n```\n```json\n{{\"tool\": \"ls\", \"path\": \".claude/agents\"}}\n```\n```json\n{{\"tool\": \"send_user_message\", \"message\": \"[ЗДЕСЬ РЕАЛЬНЫЙ РЕЗУЛЬТАТ ИЗ ФАЙЛОВ]\"}}\n```\n```json\n{{\"tool\": \"finish\", \"content\": \"итог\"}}\n```\n\n### ЯЗЫК: Русский.\nСегодняшняя дата: {}",
             chrono::Local::now().format("%Y-%m-%d")
         ));
 
@@ -1180,6 +1208,7 @@ impl AgentEngine {
                             message: v.get("message").and_then(|m| m.as_str()).map(|s| s.to_string()),
                             todos: v.get("todos").and_then(|t| t.as_array()).map(|a| a.clone()),
                             question: v.get("question").and_then(|q| q.as_str()).map(|s| s.to_string()),
+                            directory: v.get("directory").and_then(|d| d.as_str()).map(|s| s.to_string()),
                         };
 
                         let _thought = v.get("thought").and_then(|t| t.as_str());
@@ -1204,6 +1233,8 @@ impl AgentEngine {
                             "output": result.output.clone(),
                             "error": result.error.clone()
                         }));
+
+                        // Tool executed this turn
 
                         if call.name == "finish" {
                             final_response = result.output.clone();
@@ -1242,33 +1273,44 @@ impl AgentEngine {
                     "content": format!("Observation from tools:\n\n{}", observation) 
                 }));
             } else {
-                // If we found potential JSON blocks but none were valid tools
-                if !json_blocks.is_empty() {
-                    log::warn!("[AGENT] Malformed tool call detected. Forcing retry.");
-                    messages.push(serde_json::json!({ 
-                        "role": "user", 
-                        "content": "SYSTEM ERROR: Your last message contained JSON but no valid tool was executed. \
-                                   Ensure you use correct keys: \"thought\", \"tool\", \"path\". Try again." 
-                    }));
-                    continue;
+                // No tools called - text-only response. Accept as final answer.
+                // Extract clean text (remove any JSON artifacts first)
+                let clean_text = response.trim().to_string();
+                
+                // Remove any remaining JSON blocks
+                let mut clean = clean_text.clone();
+                let mut p = 0;
+                while let Some(start) = clean[p..].find("```json") {
+                    if let Some(end) = clean[start..].find("```") {
+                        clean.replace_range(start..start+end+3, "");
+                        p = start;
+                    } else {
+                        clean.replace_range(start.., "");
+                        break;
+                    }
                 }
-
-                // FORCE TOOL USE: If it's the first step and no tool was called
-                if step == 1 {
-                    log::warn!("[AGENT] AI is talking instead of using tools. Forcing execution turn.");
-                    messages.push(serde_json::json!({ 
-                        "role": "user", 
-                        "content": "SYSTEM ALERT: You have not called any tools. Do not talk, PERFORM actions now using tools." 
-                    }));
-                    continue; 
+                
+                // Remove leftover brace blocks
+                let mut final_clean = clean.clone();
+                let mut p = 0;
+                while let Some(start) = final_clean[p..].find('{') {
+                    let abs_start = p + start;
+                    let mut bc = 0;
+                    let mut ep = None;
+                    for (i, c) in final_clean[abs_start..].chars().enumerate() {
+                        if c == '{' { bc += 1; }
+                        else if c == '}' { bc -= 1; if bc == 0 { ep = Some(abs_start + i + 1); break; } }
+                    }
+                    if let Some(end) = ep {
+                        let potential = &final_clean[abs_start..end];
+                        if potential.contains("\"thought\"") || potential.contains("\"tool\"") {
+                            final_clean.replace_range(abs_start..end, "");
+                            p = abs_start;
+                        } else { p = end; }
+                    } else { break; }
                 }
-
-                // No tools called - either we are done or the model is just talking
-                if current_turn_response.trim().is_empty() {
-                    final_response = "Готово.".to_string();
-                } else {
-                    final_response = current_turn_response;
-                }
+                
+                final_response = final_clean.trim().to_string();
                 break;
             }
 
