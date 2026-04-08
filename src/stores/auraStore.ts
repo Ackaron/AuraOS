@@ -80,6 +80,26 @@ export interface TerminalSession {
   isRunning: boolean;
 }
 
+export interface SessionMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+}
+
+export interface SessionState {
+  sessionId: string;
+  messages: SessionMessage[];
+  compactHistory: Array<{
+    timestamp: number;
+    summary: string;
+    actions_taken: string[];
+    files_accessed: string[];
+    decisions: string[];
+    unfinished_tasks: string[];
+  }>;
+  totalTokens: number;
+  contextLimit: number;
+}
+
 interface AuraState {
   models: ModelStatus[];
   skills: Skill[];
@@ -127,6 +147,10 @@ interface AuraState {
   isSkillCoreExpanded: boolean;
   isModelRouterExpanded: boolean;
   
+  // Session State (Phase 3: Infinite Memory)
+  activeSessionId: string | null;
+  sessions: SessionState[];
+  
   setModelStatus: (model: ModelStatus) => void;
   setActiveModel: (modelName: string | null) => void;
   setOllamaConnection: (connected: boolean) => void;
@@ -157,9 +181,17 @@ interface AuraState {
   setAgentWidth: (width: number) => void;
   setProjectExpanded: (expanded: boolean) => void;
   setSkillCoreExpanded: (expanded: boolean) => void;
-  setModelRouterExpanded: (expanded: boolean) => void;
-  setContextUsage: (usage: number) => void;
-}
+      setModelRouterExpanded: (expanded: boolean) => void;
+      setContextUsage: (usage: number) => void;
+      
+      // Session Actions
+      setActiveSession: (sessionId: string | null) => void;
+      addSession: (session: SessionState) => void;
+      updateSession: (sessionId: string, updates: Partial<SessionState>) => void;
+      removeSession: (sessionId: string) => void;
+      addMessageToSession: (sessionId: string, message: SessionMessage) => void;
+      compactSession: (sessionId: string) => void;
+    }
 
 export const useAuraStore = create<AuraState>()(
   devtools(
@@ -223,6 +255,10 @@ export const useAuraStore = create<AuraState>()(
       isProjectExpanded: false,
       isSkillCoreExpanded: false,
       isModelRouterExpanded: false,
+      
+      // Session State (Phase 3)
+      activeSessionId: null,
+      sessions: [],
 
       setModelStatus: (model) =>
         set((state) => ({
@@ -397,6 +433,68 @@ export const useAuraStore = create<AuraState>()(
       setSkillCoreExpanded: (expanded) => set({ isSkillCoreExpanded: expanded }),
       setModelRouterExpanded: (expanded) => set({ isModelRouterExpanded: expanded }),
       setContextUsage: (usage) => set({ activeSessionContextUsage: usage }),
+      
+      // Session Actions (Phase 3: Infinite Memory)
+      setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+      
+      addSession: (session) => set((state) => ({
+        sessions: state.sessions.some(s => s.sessionId === session.sessionId)
+          ? state.sessions
+          : [...state.sessions, session],
+        activeSessionId: session.sessionId,
+      })),
+      
+      updateSession: (sessionId, updates) => set((state) => ({
+        sessions: state.sessions.map(s => 
+          s.sessionId === sessionId ? { ...s, ...updates } : s
+        )
+      })),
+      
+      removeSession: (sessionId) => set((state) => {
+        const newSessions = state.sessions.filter(s => s.sessionId !== sessionId);
+        return {
+          sessions: newSessions,
+          activeSessionId: state.activeSessionId === sessionId 
+            ? (newSessions[0]?.sessionId || null)
+            : state.activeSessionId
+        };
+      }),
+      
+      addMessageToSession: (sessionId, message) => set((state) => ({
+        sessions: state.sessions.map(s => 
+          s.sessionId === sessionId 
+            ? { 
+                ...s, 
+                messages: [...s.messages, message],
+                totalTokens: s.totalTokens + Math.ceil(message.content.length / 4)
+              } 
+            : s
+        )
+      })),
+      
+      compactSession: (sessionId) => set((state) => ({
+        sessions: state.sessions.map(s => {
+          if (s.sessionId !== sessionId) return s;
+          
+          const tailSize = 10;
+          const tail = s.messages.slice(-tailSize);
+          const summary = {
+            timestamp: Date.now(),
+            summary: `Compacted ${s.messages.length - tailSize} messages`,
+            actions_taken: ['Previous actions summarized'],
+            files_accessed: ['Previous files summarized'],
+            decisions: ['Previous decisions summarized'],
+            unfinished_tasks: ['Previous tasks summarized'],
+          };
+          
+          return {
+            ...s,
+            messages: tail,
+            compactHistory: [...s.compactHistory, summary],
+            totalTokens: tail.reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0),
+          };
+        })
+      })),
     }),
     { name: 'AuraStore' }
   )

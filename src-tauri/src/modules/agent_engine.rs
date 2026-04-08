@@ -818,34 +818,10 @@ impl AgentEngine {
     ) -> Result<String, String> {
         let mut sections = Vec::new();
 
-        // 1. Base Persona
+        // 1. Base Persona - SIMPLIFIED
         sections.push(format!(
-            "### RULE ZERO: YOU ARE THE SYSTEM\n\
-            Ты — локальный исполнительный модуль AuraOS. Ты — часть ОС (Ryzen 9, RTX 5080), у тебя ПРЯМОЙ доступ к файлам и терминалу. \
-            Твоя задача — ВЫПОЛНЯТЬ (Execute), а не имитировать.\n\n\
-            ### ИНСТРУМЕНТЫ (CORE CAPABILITIES):\n\
-            Для ЛЮБЫХ действий используй ТОЛЬКО JSON-блоки. ЗАПРЕЩЕНО использовать форматы типа <tool_code>, [tool] или функции. \
-            Твой ответ должен содержать Thought (мысли) и ОДИН ИЛИ НЕСКОЛЬКО JSON-блоков в формате:\n\
-            ```json\n\
-            {{ \"thought\": \"Мои мысли\", \"tool\": \"ls\", \"path\": \"src\" }}\n\
-            ```\n\n\
-            ### ДОСТУПНЫЕ ИНСТРУМЕНТЫ:\n\
-            - `ls`: {{ \"tool\": \"ls\", \"path\": \"path/to/dir\" }}\n\
-            - `read`: {{ \"tool\": \"read\", \"path\": \"path/to/file\" }}\n\
-            - `glob_search`: {{ \"tool\": \"glob_search\", \"pattern\": \"**/*.rs\" }}\n\
-            - `grep`: {{ \"tool\": \"grep\", \"pattern\": \"something\", \"path\": \"src\" }}\n\
-            - `write_file`: {{ \"tool\": \"write_file\", \"path\": \"file.txt\", \"content\": \"...\" }}\n\
-            - `edit_file`: {{ \"tool\": \"edit_file\", \"path\": \"file.txt\", \"target\": \"old\", \"replacement\": \"new\", \"replace_all\": false }}\n\
-            - `todo_write`: {{ \"tool\": \"todo_write\", \"todos\": [{{ \"content\": \"...\", \"status\": \"pending\" }}] }}\n\
-            - `send_user_message`: {{ \"tool\": \"send_user_message\", \"message\": \"...\" }}\n\
-            - `finish`: {{ \"tool\": \"finish\", \"content\": \"Итоговый отчет\" }}\n\n\
-            ### ПРАВИЛА (Operating Procedures):\n\
-            1. **Todo First**: Начинай сложные задачи с `todo_write`, чтобы пользователь видел твой план.\n\
-            2. **Verified Action**: Не пиши \"я сделал\", пока не увидишь Observation.\n\
-            3. **Thought Logging**: Твои мысли из блока Thought будут показаны в логах Admin.\n\
-            5. **Language**: Русский.\n\
-            Сегодняшняя дата: {}\n",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+            "### ТЫ — AuraOS AGENT\nТы — локальный AI-ассистент. Твоя задача — помогать пользователю.\n\n### ПРАВИЛА:\n1. Если вопрос требует простого ответа — отвечай ПРОСТЫМ ТЕКСТОМ без JSON.\n2. Используй инструменты (JSON) ТОЛЬКО когда нужно что-то сделать (файл, код, поиск).\n3. Для ответа пользователю: используй текст или {{\"tool\": \"send_user_message\", \"message\": \"...\"}}.\n4. Для завершения: {{\"tool\": \"finish\", \"content\": \"итог\"}}.\n5. НЕ выводи мысли (thought) — они только для контекста.\n\n### ИНСТРУМЕНТЫ: read, ls, glob_search, grep, write_file, edit_file, send_user_message, finish\n### ЯЗЫК: Русский.\nСегодняшняя дата: {}",
+            chrono::Local::now().format("%Y-%m-%d")
         ));
 
         // 2. Database Context (Active Skills)
@@ -866,27 +842,21 @@ impl AgentEngine {
                 .ok();
 
                 if let Some(ref path_str) = project_path {
-                    // Start of context
-                    let executor = ToolExecutor::new();
-                    let tree = executor.list_directory(path_str);
-                    if tree.success {
-                        sections.push(format!("# Project File Structure\n{}\n", tree.output));
-                    }
-
+                    // START OF CONTEXT - только если нужен контекст проекта
+                    // Убрано сканирование структуры файлов - добавляет тысячи токенов
+                    // Можно включить позже если проект активный
                     sections.push(format!(
                         "# Project Context\n\
-                        КРИТИЧЕСКИ ВАЖНО: Ты находишься в режиме РАБОТЫ С ПРОЕКТОМ.\n\
-                        Абсолютный путь к проекту на диске: {}\n\
-                        При вызове инструментов ВСЕГДА используй ТОЛЬКО ОТНОСИТЕЛЬНЫЕ пути.\n",
+                        Ты работаешь с проектом: {}\n\
+                        Для навигации используй ls, read, glob_search, grep.\n",
                         path_str
                     ));
 
-                // Scan .rules/*.md and CLAW.md
+                // Scan ONLY CLAUDE.md (not all .rules/*.md - слишком много токенов)
                 let root = std::path::Path::new(path_str);
                 let mut local_rules = Vec::new();
 
-                // Check CLAUDE.md / CLAW.md / instructions.md
-                for candidate in ["CLAUDE.md", "CLAW.md", "instructions.md", ".rules/instructions.md"] {
+                for candidate in ["CLAUDE.md"] {
                     let p = root.join(candidate);
                     if p.exists() {
                         if let Ok(content) = std::fs::read_to_string(p) {
@@ -895,28 +865,12 @@ impl AgentEngine {
                     }
                 }
 
-                // Check .rules/*.md
-                let rules_dir = root.join(".rules");
-                if rules_dir.is_dir() {
-                    if let Ok(entries) = std::fs::read_dir(rules_dir) {
-                        for entry in entries.flatten() {
-                            let p = entry.path();
-                            if p.extension().map_or(false, |ext| ext == "md") {
-                                if let Ok(content) = std::fs::read_to_string(&p) {
-                                    let name = p.file_name().unwrap().to_string_lossy();
-                                    local_rules.push(format!("## Rule: {}\n{}", name, content));
-                                }
-                            }
-                        }
-                    }
-                }
-
                 if !local_rules.is_empty() {
-                    sections.push(format!("# Local Project Rules\n{}\n", local_rules.join("\n\n")));
+                    sections.push(format!("# Project Rules (summary)\n{}\n", local_rules.join("\n\n")));
                 }
             }
 
-            // Get Active Skills
+            // Get Active Skills - упрощенно
             let mut stmt = conn
                 .prepare(
                     "SELECT s.name, s.path FROM available_skills s 
@@ -925,28 +879,16 @@ impl AgentEngine {
                 )
                 .map_err(|e| e.to_string())?;
 
-            let skill_entries = stmt
-                .query_map([pid], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(|e| e.to_string())?;
+            let skill_names: Vec<String> = stmt
+                .query_map([pid], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
 
-            let mut skills_content = Vec::new();
-            for skill in skill_entries.flatten() {
-                let skill_name = skill.0;
-                let skill_path = std::path::Path::new(&skill.1).join("SKILL.md");
-
-                if skill_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(skill_path) {
-                        skills_content.push(format!("## Skill: {}\n{}", skill_name, content));
-                    }
-                }
-            }
-
-            if !skills_content.is_empty() {
+            if !skill_names.is_empty() {
                 sections.push(format!(
-                    "# Active Skills Enabled\nThese are the specialized instructions for currently active skills:\n\n{}",
-                    skills_content.join("\n\n")
+                    "# Активные скиллы: {}\n",
+                    skill_names.join(", ")
                 ));
             }
         }
@@ -1051,7 +993,7 @@ impl AgentEngine {
         messages.push(serde_json::json!({ "role": "user", "content": user_message }));
 
         let mut final_response = String::new();
-        let max_steps = 15;
+        let max_steps = 5;
 
         for step in 1..=max_steps {
             if cancellation_token.load(Ordering::SeqCst) {
@@ -1148,7 +1090,7 @@ impl AgentEngine {
                 } else { break; }
             }
 
-            let final_history = format!("{}\n{}", extracted_thoughts.join("\n"), history_text).trim().to_string();
+            let final_history = format!("[внутренняя работа: {}]", extracted_thoughts.join(" | ")).trim().to_string();
             if !final_history.is_empty() {
                 messages.push(serde_json::json!({ "role": "assistant", "content": final_history }));
             }
@@ -1240,14 +1182,9 @@ impl AgentEngine {
                             question: v.get("question").and_then(|q| q.as_str()).map(|s| s.to_string()),
                         };
 
-                        let thought = v.get("thought").and_then(|t| t.as_str());
-                        if let Some(t) = thought {
-                            on_step(serde_json::json!({
-                                "step": step,
-                                "type": "thought",
-                                "content": t
-                            }));
-                        }
+                        let _thought = v.get("thought").and_then(|t| t.as_str());
+                        // Don't emit thoughts to UI - they're internal reasoning
+                        // They are used for context only
 
                         log::info!("[AGENT] Executing tool: {}", call.name);
                         on_step(serde_json::json!({
@@ -1326,13 +1263,13 @@ impl AgentEngine {
                     continue; 
                 }
 
-                // No tools called - either we are done or the model is just talking/confused
+                // No tools called - either we are done or the model is just talking
                 if current_turn_response.trim().is_empty() {
-                    messages.push(serde_json::json!({ "role": "user", "content": "You didn't perform any actions. Please use tools or call 'finish'." }));
+                    final_response = "Готово.".to_string();
                 } else {
                     final_response = current_turn_response;
-                    break;
                 }
+                break;
             }
 
             // History Compaction: Prevent context overflow
@@ -1385,10 +1322,19 @@ impl AgentEngine {
 
         let cleaned = sanitized.trim().to_string();
 
-        Ok(if cleaned.is_empty() && !final_response.is_empty() {
-            "Я успешно провел анализ и выполнил необходимые действия. Готов к следующему шагу.".to_string()
+        // Extra cleanup: remove any trailing JSON remnants, normalize whitespace
+        let super_clean = cleaned
+            .lines()
+            .filter(|line| !line.trim().starts_with('{') && !line.trim().starts_with('}'))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+
+        Ok(if super_clean.is_empty() && !final_response.is_empty() {
+            "Выполнено. Готов к следующей задаче.".to_string()
         } else {
-            cleaned
+            super_clean
         })
     }
 }

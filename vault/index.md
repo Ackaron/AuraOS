@@ -37,3 +37,9 @@ updated: 2026-03-20
 3. **Persist**: Команда `/save` автоматически линкует новую сессию в раздел [[Sessions]].
 
 > **Engineering Note**: База знаний должна быть такой же чистой и структурированной, как звук **Greco Les Paul 1975**. Никакого мусора, только рабочие связи [[Wikilinks]].
+
+---
+
+## 📜 Sessions
+
+- [[vault/sessions/2026-04-08_phase2-fixes]] — Phase 2 Fixes: AgentRegistry, CommandRegistry, MCP Client, Context Manager, xterm.js

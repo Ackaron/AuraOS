@@ -87,7 +87,58 @@ export async function initDatabase(): Promise<Database> {
   } catch (e) {
     console.warn('Table project_skills may already exist:', e);
   }
-  
+
+  // Sessions table for context persistence
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT,
+        model_id TEXT,
+        transcript TEXT DEFAULT '[]',
+        compact_state TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES project_index(id) ON DELETE SET NULL
+      )
+    `);
+  } catch (e) {
+    console.warn('Table sessions may already exist:', e);
+  }
+
+  // Agents registry table
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS agents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        model_name TEXT,
+        is_active INTEGER DEFAULT 1,
+        metadata TEXT DEFAULT '{}',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {
+    console.warn('Table agents may already exist:', e);
+  }
+
+  // Commands registry table
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS commands (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        scope TEXT DEFAULT 'global',
+        metadata TEXT DEFAULT '{}',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {
+    console.warn('Table commands may already exist:', e);
+  }
+   
   return db;
 }
 
@@ -175,4 +226,76 @@ export async function getProjectSkills(projectId: string): Promise<{ skill_id: s
     skill_id: r.skill_id,
     is_active: r.is_active === 1
   }));
+}
+
+// === Session Persistence (Phase 3: Infinite Memory) ===
+
+export interface SessionRecord {
+  id: string;
+  project_id: string | null;
+  model_id: string | null;
+  transcript: string;
+  compact_state: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompactState {
+  compact_history: Array<{
+    timestamp: number;
+    summary: string;
+    actions_taken: string[];
+    files_accessed: string[];
+    decisions: string[];
+    unfinished_tasks: string[];
+  }>;
+  total_tokens: number;
+  context_limit: number;
+}
+
+export async function saveSession(
+  sessionId: string,
+  projectId: string | null,
+  modelId: string | null,
+  transcript: string,
+  compactState: CompactState | null
+): Promise<void> {
+  const database = await initDatabase();
+  await database.execute(
+    `INSERT OR REPLACE INTO sessions (id, project_id, model_id, transcript, compact_state, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+    [sessionId, projectId, modelId, transcript, compactState ? JSON.stringify(compactState) : null]
+  );
+}
+
+export async function getSession(sessionId: string): Promise<SessionRecord | null> {
+  const database = await initDatabase();
+  const rows = await database.select<SessionRecord[]>(
+    `SELECT id, project_id, model_id, transcript, compact_state, created_at, updated_at 
+     FROM sessions WHERE id = ?`,
+    [sessionId]
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
+
+export async function getProjectSessions(projectId: string): Promise<SessionRecord[]> {
+  const database = await initDatabase();
+  return database.select<SessionRecord[]>(
+    `SELECT id, project_id, model_id, transcript, compact_state, created_at, updated_at 
+     FROM sessions WHERE project_id = ? ORDER BY updated_at DESC`,
+    [projectId]
+  );
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const database = await initDatabase();
+  await database.execute(`DELETE FROM sessions WHERE id = ?`, [sessionId]);
+}
+
+export async function getAllSessions(): Promise<SessionRecord[]> {
+  const database = await initDatabase();
+  return database.select<SessionRecord[]>(
+    `SELECT id, project_id, model_id, transcript, compact_state, created_at, updated_at 
+     FROM sessions ORDER BY updated_at DESC LIMIT 50`
+  );
 }

@@ -193,7 +193,8 @@ export function AgentPanel() {
             
             if (type === 'chunk' && content) {
                 setStreamingChars(prev => prev + content.length);
-                return msg; 
+                newContent += content;
+                return { ...msg, content: newContent }; 
             } else if (type === 'tool_result' && tool === 'finish') {
                 newContent = output || content;
             } else if (type === 'finish_step') {

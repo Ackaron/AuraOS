@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::io::{Write, BufReader, BufRead};
 use std::thread;
 use tauri::{Emitter, Manager, State, AppHandle, Listener};
-use crate::modules::{ollama::OllamaService, Monitor, SkillEngine, SystemStats, AgentEngine};
+use crate::modules::{ollama::OllamaService, Monitor, SkillEngine, SystemStats, AgentEngine, AgentRegistry, CommandRegistry, McpClient, McpServerConfig, ContextManager};
 use notify::{Watcher, RecursiveMode, Config};
 
 struct TerminalSession {
@@ -20,9 +20,12 @@ struct AppState {
     monitor: Mutex<Monitor>,
     skill_engine: Mutex<SkillEngine>,
     agent_engine: Mutex<AgentEngine>,
+    agent_registry: Mutex<AgentRegistry>,
+    command_registry: Mutex<CommandRegistry>,
+    mcp_client: Mutex<McpClient>,
+    context_manager: Mutex<ContextManager>,
     terminal_sessions: Mutex<HashMap<String, Arc<Mutex<TerminalSession>>>>,
     agent_cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
-    // New: Active file watcher
     file_watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
 
@@ -110,6 +113,8 @@ fn add_skill(
         path: std::path::PathBuf::from(path),
         tags,
         is_indexed: false,
+        source_url: None,
+        version: None,
     };
     engine.index_skill(metadata)
 }
@@ -121,6 +126,51 @@ fn remove_skill(state: State<AppState>, id: String) -> Result<bool, String> {
         .lock()
         .map_err(|e| e.to_string())?;
     engine.remove_skill(&id)
+}
+
+#[tauri::command]
+fn clone_skill_from_github(state: State<AppState>, url: String, branch: Option<String>) -> Result<modules::SkillMetadata, String> {
+    let engine = state
+        .skill_engine
+        .lock()
+        .map_err(|e| e.to_string())?;
+    engine.clone_skill(&url, branch.as_deref())
+}
+
+#[tauri::command]
+fn update_skill(state: State<AppState>, id: String) -> Result<modules::SkillMetadata, String> {
+    let engine = state
+        .skill_engine
+        .lock()
+        .map_err(|e| e.to_string())?;
+    engine.update_skill(&id)
+}
+
+#[tauri::command]
+fn scan_local_skills(state: State<AppState>) -> Result<Vec<modules::SkillMetadata>, String> {
+    let engine = state
+        .skill_engine
+        .lock()
+        .map_err(|e| e.to_string())?;
+    engine.scan_local_skills()
+}
+
+#[tauri::command]
+fn get_skill_content(state: State<AppState>, skill_id: String) -> Result<Vec<modules::SkillContent>, String> {
+    let engine = state
+        .skill_engine
+        .lock()
+        .map_err(|e| e.to_string())?;
+    engine.get_skill_content(&skill_id)
+}
+
+#[tauri::command]
+fn search_skills_by_tag(state: State<AppState>, tag: String) -> Result<Vec<modules::SkillMetadata>, String> {
+    let engine = state
+        .skill_engine
+        .lock()
+        .map_err(|e| e.to_string())?;
+    engine.search_by_tag(&tag)
 }
 
 #[tauri::command]
@@ -590,6 +640,8 @@ fn get_available_skills() -> Result<Vec<modules::SkillMetadata>, String> {
                                 path,
                                 tags: vec![],
                                 is_indexed: false,
+                                source_url: None,
+                                version: None,
                             });
                         }
                     }
@@ -599,6 +651,168 @@ fn get_available_skills() -> Result<Vec<modules::SkillMetadata>, String> {
     }
     
     Ok(skills)
+}
+
+#[tauri::command]
+fn get_discovered_agents(state: State<AppState>) -> Result<Vec<modules::AgentDefinition>, String> {
+    let registry = state.agent_registry.lock().map_err(|e| e.to_string())?;
+    registry.get_agents()
+}
+
+#[tauri::command]
+fn get_agent_prompt(state: State<AppState>, name: String) -> Result<String, String> {
+    let registry = state.agent_registry.lock().map_err(|e| e.to_string())?;
+    registry.get_agent_prompt(&name)
+}
+
+#[tauri::command]
+fn refresh_agent_registry(state: State<AppState>) -> Result<Vec<modules::AgentDefinition>, String> {
+    let mut registry = state.agent_registry.lock().map_err(|e| e.to_string())?;
+    
+    if let Ok(current_dir) = std::env::current_dir() {
+        let agents_path = current_dir.join(".claude").join("agents");
+        if agents_path.exists() {
+            log::info!("[AGENT] Refreshing agents from: {:?}", agents_path);
+            registry.scan_agents(&agents_path)
+        } else {
+            Err("Agents directory does not exist".to_string())
+        }
+    } else {
+        Err("Could not determine current directory".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_discovered_commands(state: State<AppState>) -> Result<Vec<modules::CommandDefinition>, String> {
+    let registry = state.command_registry.lock().map_err(|e| e.to_string())?;
+    registry.get_commands()
+}
+
+#[tauri::command]
+fn get_command_content(state: State<AppState>, name: String) -> Result<String, String> {
+    let registry = state.command_registry.lock().map_err(|e| e.to_string())?;
+    if let Some(cmd) = registry.get_command(&name)? {
+        Ok(cmd.content)
+    } else {
+        Err(format!("Command not found: {}", name))
+    }
+}
+
+#[tauri::command]
+fn refresh_command_registry(state: State<AppState>) -> Result<Vec<modules::CommandDefinition>, String> {
+    let mut registry = state.command_registry.lock().map_err(|e| e.to_string())?;
+    
+    if let Ok(current_dir) = std::env::current_dir() {
+        let commands_path = current_dir.join(".claude").join("commands");
+        if commands_path.exists() {
+            log::info!("[COMMAND] Refreshing commands from: {:?}", commands_path);
+            registry.scan_commands(&commands_path)
+        } else {
+            Err("Commands directory does not exist".to_string())
+        }
+    } else {
+        Err("Could not determine current directory".to_string())
+    }
+}
+
+// === MCP Client Commands ===
+
+#[tauri::command]
+fn register_mcp_server(
+    state: State<AppState>,
+    name: String,
+    command: String,
+    args: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    let client = state.mcp_client.lock().map_err(|e| e.to_string())?;
+    let config = McpServerConfig {
+        name: name.clone(),
+        command,
+        args,
+        env,
+    };
+    client.register_server(name, config)
+}
+
+#[tauri::command]
+fn start_mcp_server(state: State<AppState>, name: String) -> Result<(), String> {
+    let client = state.mcp_client.lock().map_err(|e| e.to_string())?;
+    client.start_server(&name)
+}
+
+#[tauri::command]
+fn stop_mcp_server(state: State<AppState>, name: String) -> Result<(), String> {
+    let client = state.mcp_client.lock().map_err(|e| e.to_string())?;
+    client.stop_server(&name)
+}
+
+#[tauri::command]
+fn get_mcp_servers_status(state: State<AppState>) -> Result<Vec<modules::McpServerStatus>, String> {
+    let client = state.mcp_client.lock().map_err(|e| e.to_string())?;
+    client.get_all_status()
+}
+
+// === Context Manager Commands ===
+
+#[tauri::command]
+fn create_session(state: State<AppState>, session_id: String) -> Result<(), String> {
+    let mut manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    manager.create_session(session_id);
+    Ok(())
+}
+
+#[tauri::command]
+fn add_session_message(state: State<AppState>, session_id: String, role: String, content: String) -> Result<(), String> {
+    let mut manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    manager.add_message(&session_id, role, content);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_session_context(state: State<AppState>, session_id: String) -> Result<Vec<modules::SessionState>, String> {
+    let manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    Ok(vec![modules::SessionState {
+        session_id: session_id.clone(),
+        messages: Default::default(),
+        compact_history: vec![],
+        total_tokens: 0,
+        context_limit: 0,
+    }])
+}
+
+#[tauri::command]
+fn check_and_compact(state: State<AppState>, session_id: String) -> Result<Option<String>, String> {
+    let mut manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.maybe_compact(&session_id))
+}
+
+#[tauri::command]
+fn get_context_usage(state: State<AppState>, session_id: String) -> Result<(usize, usize), String> {
+    let manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.get_usage(&session_id))
+}
+
+#[tauri::command]
+fn get_full_session_state(state: State<AppState>, session_id: String) -> Result<Option<modules::SessionState>, String> {
+    let manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.get_session_state(&session_id))
+}
+
+#[tauri::command]
+fn load_session_state(state: State<AppState>, session_id: String) -> Result<modules::SessionState, String> {
+    let manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    if let Some(state) = manager.get_session_state(&session_id) {
+        return Ok(state);
+    }
+    Err("Session not found".to_string())
+}
+
+#[tauri::command]
+fn delete_session_state(state: State<AppState>, session_id: String) -> Result<(), String> {
+    let mut manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    manager.remove_session(&session_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -690,12 +904,35 @@ pub fn run() {
             monitor.set_app_handle(app.handle().clone());
             monitor.start_emitting();
 
-            let skill_engine = SkillEngine::new();
+            let skill_engine = SkillEngine::new(app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("skills")));
+            let agent_registry = AgentRegistry::new();
+            let command_registry = CommandRegistry::new();
+            let mcp_client = McpClient::new();
+            let context_manager = ContextManager::new(64000); // 64k default context
+            
+            // Scan .claude/agents/ and .claude/commands/ directories
+            if let Ok(current_dir) = std::env::current_dir() {
+                let agents_path = current_dir.join(".claude").join("agents");
+                if agents_path.exists() {
+                    log::info!("[AGENT] Scanning agents from: {:?}", agents_path);
+                    let _ = agent_registry.scan_agents(&agents_path);
+                }
+                
+                let commands_path = current_dir.join(".claude").join("commands");
+                if commands_path.exists() {
+                    log::info!("[COMMAND] Scanning commands from: {:?}", commands_path);
+                    let _ = command_registry.scan_commands(&commands_path);
+                }
+            }
 
             app.manage(AppState {
                 monitor: Mutex::new(monitor),
                 skill_engine: Mutex::new(skill_engine),
                 agent_engine: Mutex::new(modules::AgentEngine::new()),
+                agent_registry: Mutex::new(agent_registry),
+                command_registry: Mutex::new(command_registry),
+                mcp_client: Mutex::new(mcp_client),
+                context_manager: Mutex::new(context_manager),
                 terminal_sessions: Mutex::new(HashMap::new()),
                 agent_cancels: Mutex::new(HashMap::new()),
                 file_watcher: Mutex::new(None),
@@ -756,6 +993,21 @@ pub fn run() {
             run_reactive_agent,
             stop_reactive_agent,
             watch_project,
+            get_discovered_agents,
+            get_agent_prompt,
+            refresh_agent_registry,
+            get_discovered_commands,
+            get_command_content,
+            refresh_command_registry,
+            register_mcp_server,
+            start_mcp_server,
+            stop_mcp_server,
+            get_mcp_servers_status,
+            create_session,
+            add_session_message,
+            get_session_context,
+            check_and_compact,
+            get_context_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

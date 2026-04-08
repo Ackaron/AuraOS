@@ -1,95 +1,588 @@
-# 🗺️ ROADMAP: AuraOS v1.0.0
+# 🗺️ Master Roadmap: AuraOS 2.0 (Cognitive Shell)
 
-## 🎯 Текущая цель
-**Phase 2: UI Shell** — ✅ ЗАВЕРШЕНО. Agentic Power в процессе.
+## 🎯 Current Objective
 
----
+Создание высокопроизводительной, стабильной, приватной и эстетически совершенной когнитивной оболочки.  
+Фокус: портирование и адаптация лучших архитектурных решений из `Claw-code` и `OpenClaude` с полным сохранением аппаратного слоя старой AuraOS, но в более чистой, модульной и производительной реализации.
 
-## 🏗️ Milestones
+### Цель продукта
 
-### 🔴 Phase 0: Bootstrap (Sprint 0) — ✅ ЗАВЕРШЕНО
-| # | Задача | DoD | Статус |
-|---|--------|-----|--------|
-| 0.1 | Tauri + React + TS каркас | Каркас запускается | ✅ |
-| 0.2 | Tailwind + Framer Motion + Zustand | npm run build проходит | ✅ |
-| 0.3 | ESLint/Prettier strict mode | Нет TS-errors | ✅ |
-| 0.4 | Zustand store | Counter demo работает | ✅ |
-| 0.5 | ui-ux-pro-max-skill | uipro init выполнен | ✅ |
+AuraOS 2.0 должна стать:
+- локальной AI-оболочкой для кодинга, аналитики и автоматизации;
+- системой с динамическими ролями и глобальными скиллами;
+- стабильным desktop shell с аппаратным мониторингом;
+- платформой, где знания, инструменты и роли живут долго и переиспользуются между проектами.
 
-### 🔴 Phase 1: Foundation Core — ✅ ЗАВЕРШЕНО
-| # | Задача | DoD | Приоритет | Статус |
-|---|--------|-----|-----------|--------|
-| 1.1 | Tauri Commands bridge | Rust ↔ TS invoke работает | 🔴 | ✅ |
-| 1.2 | SQLite plugin | Schema валидна | 🔴 | ✅ |
-| 1.3 | Таблицы `ai_models_config`, `skill_core_index` | Миграция проходит | 🔴 | ✅ |
-| 1.4 | Ollama API integration | Пинг к localhost:11434 | 🔴 | ✅ |
-| 1.5 | Model Router логика | `/logic` → small, `/code` → large | 🟡 | ✅ |
-| 1.6 | check_ollama_status command | Статус при старте | 🟡 | ✅ |
-| 1.7 | run_inference command | Выполнение запроса | 🟡 | ✅ |
+### Ключевой принцип
 
-### 🔵 Phase 2: UI Shell (Analytic Noir) — ✅ ЗАВЕРШЕНО
-| # | Задача | DoD | Приоритет | Статус |
-|---|--------|-----|-----------|--------|
-| 2.1 | Layout: Sidebar + Main Area | Glassmorphism, #000000 | 🔴 | ✅ |
-| 2.2 | Model Monitor Widget | VRAM отображение | 🟡 | ✅ |
-| 2.3 | NLP Terminal (K-интерфейс) | Команды работают | 🟡 | ✅ |
-| 2.4 | Skill Core Browser | Markdown индекс | 🟡 | ✅ |
-| 2.5 | Workspace Editor | Code editor integration | 🟡 | ✅ |
-| 2.6 | Sidebar icon centering | 64px collapsed mode | 🟡 | ✅ |
-| 2.7 | Terminal auto-focus | Ctrl+` focus | 🟡 | ✅ |
-
-### 🟣 Phase 3: Agentic Power & Memory
-| # | Задача | DoD | Приоритет | Статус |
-|---|--------|-----|-----------|--------|
-| 3.1 | Agent Engine (Rust) | ToolExecutor в Rust | 🔴 | ✅ |
-| 3.2 | Tool: ls(path) | Directory listing | 🔴 | ✅ |
-| 3.3 | Tool: read(path) | File reading | 🔴 | ✅ |
-| 3.4 | Tool: grep(pattern) | Content search | 🔴 | ✅ |
-| 3.5 | Autonomous loop | Thought → Action → Observation | 🔴 | ✅ |
-| 3.6 | Tool Permissions | Auto/Confirm gate | 🟡 | ✅ |
-| 3.7 | Session Memory | Multi-turn context | 🟡 | 🔄 |
-| 3.8 | Project Snapshot | SQLite cache (avoid 64GB re-read) | 🟡 | 🔄 |
-
-### 🟣 Phase 4: Ecosystem Sync
-| # | Задача | DoD | Приоритет |
-|---|--------|-----|-----------|
-| 4.1 | MCP Integration | Magic UI plugins | 🟡 |
-| 4.2 | GitHub Integration | Push/pull sync | 🟡 |
-| 4.3 | 21st.dev Magic | UI component marketplace | 🟡 |
-| 4.4 | E2E tests | Playwright smoke tests | 🔴 |
-| 4.5 | TypeScript audit | Zero `any` | 🔴 |
+Сначала строим **надёжное ядро**, потом добавляем красоту, масштабирование и расширения.  
+Система должна быть не демонстрацией, а рабочим эталоном.
 
 ---
 
-## 🚩 Definition of Done (универсальное)
-- [ ] `npm run build` проходит без errors
-- [ ] `cargo check` проходит без errors
-- [ ] Нет `any` в TS-коде (strict mode)
-- [ ] UI соответствует `.rules/ui-ux.md` (8pt, Pure Black, spring animations)
-- [ ] ADR создан в `vault/architecture/`
-- [ ] `/review` от Verifier пройден
+## 🧭 Product Principles
+
+1. **Local-first by default** — никаких облачных зависимостей в базовом сценарии.
+2. **File-driven architecture** — роли, скиллы, команды и правила живут в файлах.
+3. **Layered intelligence** — контекст собирается слоями, а не монолитно.
+4. **Predictable orchestration** — каждый шаг агента должен быть объяснимым.
+5. **Hardware-aware UX** — система чувствует ресурсы машины и не ломает пользовательский поток.
+6. **Skill continuity** — знания не теряются между проектами.
+7. **Graceful degradation** — если что-то упало, shell продолжает жить.
 
 ---
 
-## 📋 Model Router Mapping
-| Task Type | Model | Notes |
-|-----------|-------|-------|
-| logic | deepseek-r1:8b | Complex reasoning |
-| code | qwen2.5:14b | Code generation |
-| docs | phi4:latest | Documentation |
-| fast | llama3.1:8b | Quick responses |
+## 🏗 Фазы разработки (Milestones)
+
+## 🟢 Phase 0: Infrastructure & Shell Bootstrap
+
+Подготовка среды и инициализация эталонной структуры проекта.
+
+### 0.1 Repository Setup
+1. Инициализировать репозиторий.
+2. Поднять основу на **Tauri v2 + Vite + React 19**.
+3. Зафиксировать структуру каталогов проекта.
+4. Определить базовую схему модулей Rust и UI.
+5. Настроить единый формат именования файлов и папок.
+
+### 0.2 Environment Configuration
+1. Создать `.env.example`.
+2. Настроить `.env` под локальные хосты:
+   - Ollama;
+   - LM Studio;
+   - будущие локальные inference providers.
+3. Добавить возможность смены endpoint без пересборки приложения.
+4. Проверить, что переменные корректно читаются как из Rust-core, так и из UI-layer.
+5. Определить fallback-конфигурацию для пустой или битой среды.
+
+### 0.3 Core Documentation
+1. Создать `CLAUDE.md`.
+2. Создать директорию `.rules/`.
+3. Создать и синхронизировать `SPECIFICATION.md`.
+4. Добавить `ROADMAP.md` и `ARCHITECTURE.md` как рабочие документы.
+5. Установить единый стиль описания ролей, скиллов, команд и ограничений.
+
+### 0.4 CI/CD Pipeline
+1. Настроить сборку под Windows.
+2. Добавить linting для Rust (`clippy`).
+3. Добавить форматирование (`cargo fmt`).
+4. Подключить базовые проверки TypeScript/React.
+5. Настроить минимальный CI для:
+   - build;
+   - lint;
+   - unit tests;
+   - packaging smoke check.
+
+### 0.5 Project Skeleton
+1. Определить базовые директории:
+   - `src-tauri/`
+   - `src/`
+   - `.claude/`
+   - `.rules/`
+   - `skills/`
+   - `data/`
+   - `scripts/`
+2. Заложить шаблон для будущих модулей:
+   - monitor;
+   - terminal;
+   - router;
+   - skills;
+   - sessions;
+   - agents;
+   - commands.
 
 ---
 
-## 🤖 Agent Capabilities (v1.0)
-| Tool | Status | Permission |
-|------|--------|------------|
-| ls(path) | ✅ Working | Auto |
-| read(path) | ✅ Working | Auto |
-| grep(pattern) | ✅ Working | Auto |
-| write | 🔒 Ready | Confirm |
-| terminal_cmd | 🔒 Ready | Confirm |
+## 🔵 Phase 1: Hardware-Aware Sidecar (The Observability Layer)
+
+Портирование системы мониторинга и низкоуровневых инструментов из старой AuraOS.
+
+### 1.1 Refactoring Monitor
+1. Перенести `monitor.rs`.
+2. Адаптировать сбор статистики под `sysinfo`.
+3. Получить:
+   - частоты CPU;
+   - нагрузку по ядрам;
+   - температуру CPU;
+   - память;
+   - swap;
+   - общий health-state.
+4. Интегрировать `nvml-wrapper` для RTX 5080.
+5. Вывести:
+   - VRAM usage;
+   - GPU load;
+   - temperature;
+   - power limit;
+   - fan/power state, если доступно.
+6. Определить обновление данных по таймеру.
+7. Зафиксировать интервал polling и polling policy.
+8. Добавить защиту от ошибок драйвера и недоступности NVML.
+
+### 1.2 IPC Emitting
+1. Создать Rust-таймер на базе Tokio interval.
+2. Стримить статусы в React через Tauri events.
+3. Установить типизированные payloads для каждого события.
+4. Добавить throttling, чтобы не перегружать UI.
+5. Разделить:
+   - periodic updates;
+   - emergency updates;
+   - service-state changes.
+
+### 1.3 Terminal Pipeline
+1. Перенести `TerminalSession`.
+2. Адаптировать её под асинхронные потоки.
+3. Поддержать:
+   - запуск процесса;
+   - чтение stdout/stderr;
+   - стриминг данных в UI;
+   - graceful termination;
+   - restart.
+4. Реализовать обработку ANSI-последовательностей.
+5. Обеспечить корректный рендер текста, цветов и control sequences.
+6. Подготовить совместимость с будущим встроенным agent terminal output.
+
+### 1.4 Local Persistence Foundation
+1. Инициализировать SQLite базу `auraos.db`.
+2. Создать схему для:
+   - проектов;
+   - сессий;
+   - моделей;
+   - скиллов;
+   - ролей;
+   - команд.
+3. Определить миграционный механизм.
+4. Проверить возможность восстановления после повреждения частичных данных.
+5. Добавить базовые индексы для часто используемых запросов.
+
+### 1.5 Observability UX
+1. Добавить минимальный live widget в sidebar.
+2. Показать статус:
+   - CPU;
+   - GPU;
+   - RAM;
+   - service state.
+3. Подготовить цветовую индикацию:
+   - Cyan = Chill;
+   - Orange = Thinking;
+   - Red = Error/OOM.
+4. Сделать первые визуальные заглушки для будущего премиального HUD.
 
 ---
 
-*Обновлено: 2026-04-06*
+## 🟣 Phase 2: Cognitive Intelligence (Model & Orchestration)
+
+Цель: создать “мозг”, способный к глубокому рассуждению, маршрутизации и управлению контекстом.
+
+### 2.1 OpenAI Compatibility Shim
+1. Портировать логику `openaiShim.ts`.
+2. Определить единый abstraction layer для провайдеров.
+3. Поддержать трансляцию форматов:
+   - Anthropic-style messages;
+   - OpenAI chat completion structure;
+   - local provider responses.
+4. Реализовать streaming bridge.
+5. Обработать:
+   - token deltas;
+   - tool calls;
+   - event stream reconciliation.
+6. Добавить совместимость с ошибками провайдеров и retry policy.
+
+### 2.2 Query Engine Implementation
+1. Портировать `QueryEngine.ts`.
+2. Реализовать цикл `submitMessage`.
+3. Поддержать `maxTurns`.
+4. Ввести статусные переходы:
+   - idle;
+   - thinking;
+   - tool_calling;
+   - observing;
+   - summarizing;
+   - completed;
+   - failed.
+5. Добавить state machine для оркестрации.
+6. Определить retry strategy по категориям ошибок.
+7. Обеспечить прозрачную передачу контекста между шагами.
+
+### 2.3 Structured Tool Calling
+1. Определить инструменты агента через JSON Schema.
+2. Создать валидатор вызовов.
+3. Описать нормализацию аргументов.
+4. Проверять корректность входных данных до выполнения.
+5. Ввести единый формат ответа инструмента:
+   - success;
+   - warning;
+   - partial;
+   - error.
+
+### 2.4 Dynamic Model Router Logic
+1. Автоматически маппить роли на модели.
+2. Поддержать ручную привязку модели к роли.
+3. Дать возможность назначать разные модели разным ролям одновременно.
+4. Сохранить выбор в проектной конфигурации.
+5. Поддержать fallback-логику, если выбранная модель недоступна.
+6. Добавить быстрый переключатель модели из UI.
+
+### 2.5 Full File-Driven DFA Implementation
+1. Реализовать сканирование `.claude/agents/*.md`.
+2. Реализовать динамический watcher файлов.
+3. Автоматически обновлять UI при:
+   - добавлении файла;
+   - удалении файла;
+   - изменении файла.
+4. Поддержать `.claude/commands/*.md`.
+5. Собрать layered system prompt:
+   - Core;
+   - Agent Instruction;
+   - Skills;
+   - Project Rules.
+6. Реализовать sidebar с динамическим списком ролей.
+7. Добавить выпадающий выбор модели для каждой роли.
+8. Подготовить механизм последовательной передачи задач между ролями.
+
+### 2.6 Agent Lifecycle
+1. Создать жизненный цикл субагента:
+   - discovery;
+   - activation;
+   - execution;
+   - handoff;
+   - teardown.
+2. Поддержать одновременную работу нескольких ролей.
+3. Сделать изоляцию состояния между ролями.
+4. Сохранить общую историю сессии.
+5. Зафиксировать правила приоритетов между role instruction и project rules.
+
+---
+
+## 🟡 Phase 3: Infinite Memory (Context Management)
+
+Реализация системы предотвращения “переедания” контекста.
+
+### 3.1 Context Snip & Compact
+1. Портировать логику `snipCompact.js`.
+2. Реализовать `SnipDetector`.
+3. Отслеживать токены и предельный порог окна.
+4. Определять момент, когда нужно компактировать историю.
+5. Запускать hidden summarization task для создания summary.
+6. Формировать `Compact Boundary Message`.
+7. Отделять сжатую историю от активного хвоста.
+8. Сохранять важные факты без потери намерения задачи.
+
+### 3.2 Summary Strategy
+1. Определить формат краткого summary.
+2. Сохранять:
+   - цель;
+   - ограничения;
+   - выполненные действия;
+   - прочитанные файлы;
+   - решённые проблемы;
+   - текущий план;
+   - незавершённые риски.
+3. Избегать слишком агрессивного сжатия.
+4. Добавить возможность ручного “pinning” важных сообщений.
+5. Поддержать многоуровневую компактировку длинных сессий.
+
+### 3.3 History Persistence
+1. Перенести `history.ts`.
+2. Реализовать хранение истории в SQLite.
+3. Добавить хеширование крупных пастов.
+4. Уменьшить размер хранимых данных без потери ссылочной целостности.
+5. Сделать быстрый resume по session UUID.
+
+### 3.4 Session Recovery
+1. Восстанавливать состояние после перезапуска приложения.
+2. Восстанавливать цепочку ролей и выбранных моделей.
+3. Восстанавливать последние compact boundaries.
+4. Восстанавливать незавершённые tool calls при необходимости.
+5. Поддержать безопасное resume после сбоя.
+
+---
+
+## 🟡 Phase 4: Shared Skill Core (SSC) & Universal Installer
+
+Портирование системы плагинов и скиллов.
+
+### 4.1 Skill Cloner
+1. Рефакторить модуль `git2`.
+2. Реализовать атомарное клонирование `--depth 1`.
+3. Поддержать установку по GitHub-ссылке.
+4. Добавить выбор ветки или тега.
+5. Проверять корректность репозитория до активации.
+6. Разделить stages:
+   - clone;
+   - validate;
+   - extract metadata;
+   - index;
+   - activate.
+
+### 4.2 Skill Manifest Parsing
+1. Парсить `skill.json`.
+2. Парсить `SKILL.md`.
+3. Поддержать дополнительные metadata files.
+4. Извлекать:
+   - название;
+   - версию;
+   - теги;
+   - зависимости;
+   - совместимые модели;
+   - инструменты;
+   - MCP-настройки.
+5. Поддержать graceful fail при отсутствии части файлов.
+
+### 4.3 Dynamic Skill Loading
+1. Использовать recursive skill discovery.
+2. Поддержать локальные пути.
+3. Поддержать глобальные каталоги навыков.
+4. Поддержать backward compatibility со старыми структурами.
+5. Загружать только активные навыки.
+6. Регистрировать методы скиллов в global QueryEngine context.
+
+### 4.4 Global Indexing
+1. Создать глобальный индекс навыков.
+2. Учитывать:
+   - имена;
+   - методы;
+   - примеры;
+   - инструменты;
+   - теги;
+   - зависимости.
+3. Обеспечить быстрый поиск по Skill Core.
+4. Поддержать конфликт-резолвинг между похожими навыками.
+
+### 4.5 Skill UI
+1. Реализовать sidebar управления скиллами.
+2. Добавить тумблеры Active/Inactive.
+3. Показать источник установки.
+4. Показать версию и статус.
+5. Добавить поиск, фильтры и группировку.
+6. Поддержать переустановку и обновление навыка.
+7. Добавить индикатор совместимости с текущей задачей.
+
+### 4.6 MCP Support
+1. Определить формат подключения MCP.
+2. Запускать локальные MCP-сервера.
+3. Регистрировать MCP capabilities в Router.
+4. Поддержать остановку и перезапуск.
+5. Выводить состояние сервиса в UI.
+6. Связывать MCP с конкретными навыками или ролями.
+
+---
+
+## 🟠 Phase 5: High-End UI/UX (The Reference Shell)
+
+Создание премиальной оболочки на базе 21st.dev и других современных UI-наборов.
+
+### 5.1 Layout System
+1. Создать основной shell layout.
+2. Настроить стеклянный sidebar.
+3. Реализовать floating panels.
+4. Добавить многоуровневую навигацию.
+5. Подготовить место под:
+   - monitor widget;
+   - model router;
+   - skills panel;
+   - agent panel;
+   - terminal;
+   - sessions view.
+
+### 5.2 Integrated Component Library
+1. Подключить компоненты из **21st.dev**.
+2. Подключить **Magic UI**.
+3. Настроить единый дизайн-токен слой.
+4. Создать reusable components:
+   - cards;
+   - badges;
+   - toggles;
+   - command palette;
+   - router rows;
+   - agent pills;
+   - status chips.
+5. Обеспечить consistent spacing and motion.
+
+### 5.3 Motion System
+1. Настроить Framer Motion.
+2. Ввести spring physics для переходов.
+3. Сделать micro-animations для hover, focus, open, close.
+4. Добавить soft glow и subtle depth.
+5. Избегать визуального шума.
+
+### 5.4 Advanced Terminal & Orchestration UI
+1. Встроить xterm.js или альтернативный terminal renderer.
+2. Поддержать вывод агента прямо в поток терминала.
+3. Синхронизировать terminal output с Query Engine events.
+4. Создать DFA Dashboard:
+   - активный агент;
+   - текущая роль;
+   - модель;
+   - состояние выполнения;
+   - план шагов;
+   - ошибки и ретраи.
+5. Добавить быстрый выбор модели и роли из терминала или сайдбара.
+
+### 5.5 Responsive Experience
+1. Поддержать ultrawide мониторы.
+2. Поддержать 4K.
+3. Поддержать компактный режим.
+4. Поддержать масштабирование UI.
+5. Сохранить читаемость в любом layout density.
+
+### 5.6 Visual Identity
+1. Зафиксировать стиль “Fluid Zen”.
+2. Выстроить спокойную, премиальную палитру.
+3. Сохранить терминальную эстетику без перегруза.
+4. Сделать интерфейс похожим на professional desktop OS, а не на обычную панель настроек.
+
+---
+
+## 🔴 Phase 6: Stability & Quality Assurance (The Final Polish)
+
+Финальная стабилизация, проверка качества и доведение до уровня reference shell.
+
+### 6.1 Security Audit
+1. Проверить периметр безопасности инструментов.
+2. Запретить выход за project root без явного разрешения.
+3. Проверить filesystem access policy.
+4. Проверить работу с секретами.
+5. Проверить MCP sandboxing.
+6. Проверить отсутствие утечек чувствительных данных в логи.
+
+### 6.2 Performance Optimization
+1. Оптимизировать время запуска.
+2. Уменьшить потребление памяти UI.
+3. Оптимизировать polling мониторинга.
+4. Сократить overhead на маршрутизацию моделей.
+5. Оптимизировать SQLite запросы.
+6. Сократить лишние перерендеры React.
+7. Проверить responsiveness под нагрузкой.
+
+### 6.3 Reference Validation
+1. Проверить поведение на parity с оригинальным Claude Code в задачах:
+   - refactor;
+   - analysis;
+   - tool usage;
+   - context handling;
+   - agent flow.
+2. Сверить ожидаемые и фактические outcomes.
+3. Зафиксировать несовпадения и приоритетные gaps.
+4. Подготовить список доработок после validation.
+
+### 6.4 Manual & Auto-Tests
+1. Написать unit tests для Rust-core.
+2. Написать integration tests для orchestration layer.
+3. Написать Playwright тесты для UI.
+4. Проверить:
+   - installation flow;
+   - model switching;
+   - skill activation;
+   - agent discovery;
+   - session recovery;
+   - context compacting;
+   - terminal streaming;
+   - monitoring widget.
+5. Запустить smoke tests перед релизом.
+
+### 6.5 Release Hardening
+1. Проверить упаковку приложения.
+2. Проверить portable mode.
+3. Проверить установку и обновление.
+4. Подготовить release notes.
+5. Зафиксировать known issues.
+6. Подготовить rollback strategy.
+
+---
+
+## 🚀 Phase 7: Optional Expansion Layer
+
+Эта фаза не обязательна для MVP, но важна для long-term vision.
+
+### 7.1 Knowledge Graph
+1. Построить граф связей между:
+   - проектами;
+   - скиллами;
+   - ролями;
+   - сессиями;
+   - правилами;
+   - инструментами.
+2. Сделать визуализацию зависимостей.
+3. Поддержать search by relationship.
+
+### 7.2 Obsidian Sync
+1. Интегрировать с Obsidian vault.
+2. Поддержать синхронизацию знаний.
+3. Обеспечить двустороннее обновление.
+4. Не нарушать local-first политику.
+
+### 7.3 Local Fine-Tuning
+1. Исследовать LoRA/adapter-based pipelines.
+2. Поддержать локальный набор данных.
+3. Ввести безопасный режим обучения.
+4. Сохранять контроль пользователя над датасетом.
+
+### 7.4 Plugin Marketplace
+1. Подготовить каталог скиллов.
+2. Поддержать версионирование.
+3. Добавить рейтинг совместимости.
+4. Поддержать импорт одним кликом.
+
+---
+
+## 🔧 Cross-Phase Engineering Rules
+
+### A. File-Driven First
+Любая новая сущность должна иметь своё файловое представление:
+- агент;
+- скилл;
+- команда;
+- правило;
+- конфигурация;
+- preset;
+- workflow.
+
+### B. No Hidden Magic
+Никакие критичные решения не должны происходить “молча”.  
+Любое изменение модели, роли, скилла, состояния или маршрута должно быть наблюдаемым.
+
+### C. Incremental Build
+Каждая фаза должна давать работающий продукт, а не только архитектурную заготовку.
+
+### D. Compatibility Preservation
+Старые наработки не выбрасываются, а адаптируются:
+- monitor;
+- terminal;
+- session logic;
+- skills;
+- context management.
+
+### E. Failure Tolerance
+Система должна быть устойчивой:
+- к недоступности модели;
+- к падению MCP;
+- к ошибкам skill package;
+- к повреждённой истории;
+- к частичным сбоям UI.
+
+---
+
+## 🚩 Definition of Done
+
+Финальная цель считается достигнутой, если выполняются все условия:
+
+1. Агент успешно выполняет многошаговую задачу с промежуточным compacting контекста.
+2. Система корректно восстанавливает сессию после перезапуска.
+3. Статистика GPU RTX 5080 обновляется быстро и стабильно.
+4. Скилл из GitHub устанавливается и активируется в один клик.
+5. Субагенты динамически подхватываются из `.claude/agents/`.
+6. Модели можно назначать по ролям без правки кода.
+7. Интерфейс ощущается как премиальное desktop-приложение уровня Linear / Cursor.
+8. Все данные и вычисления остаются local-first.
+9. MCP-серверы и навыки интегрируются прозрачно и безопасно.
+10. Архитектура остаётся расширяемой, предсказуемой и документированной.
+
+---
+
+## 📌 Final Implementation Note
+
+Порядок должен быть именно таким:  
+**сначала инфраструктура и надёжность**, затем **когнитивное ядро**, затем **память**, затем **скиллы и агенты**, затем **UI**, и только потом **полировка и расширения**.
+
+Если нужна идеальная реализация AuraOS 2.0, то главная ошибка — начать с красоты.  
+Правильный путь — сначала сделать систему, которая **стабильно думает, помнит, маршрутизирует и исполняет**.

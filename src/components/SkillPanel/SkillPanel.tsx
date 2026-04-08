@@ -85,7 +85,7 @@ export function SkillPanel({ isCollapsed = false }: SkillPanelProps) {
     e.stopPropagation();
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('delete_plugin', { path });
+      await invoke('delete_skill_folder', { path });
       
       const { deleteAvailableSkill } = await import('@/lib/database');
       await deleteAvailableSkill(skillId);
@@ -175,21 +175,17 @@ export function SkillPanel({ isCollapsed = false }: SkillPanelProps) {
                         const fullUrl = url.startsWith('http') ? url : `https://github.com/${url.replace('obsidian@', '')}`;
                         
                         const { invoke } = await import('@tauri-apps/api/core');
-                        const result = await invoke<{ success: boolean; message: string; path: string }>('add_plugin', { 
-                          githubUrl: fullUrl 
+                        const result = await invoke<{ id: string; name: string; path: string; tags: string[]; is_indexed: boolean; source_url: string | null; version: string | null }>('clone_skill_from_github', { 
+                          url: fullUrl,
+                          branch: null
                         });
                         
-                        let skillName = fullUrl.split('/').pop() || 'Unknown Skill';
-                        if (skillName.endsWith('.git')) skillName = skillName.slice(0, -4);
-
-                        if (result.success && result.path) {
+                        if (result && result.id) {
                           const { addAvailableSkill } = await import('@/lib/database');
-                          await addAvailableSkill(crypto.randomUUID(), skillName, result.path, fullUrl);
+                          await addAvailableSkill(result.id, result.name, result.path, result.source_url || undefined);
                           await loadSkills();
                           setIsAddingSkill(false);
                           setNewSkillUrl('');
-                        } else {
-                          setInstallError(result.message);
                         }
                       } catch (err) {
                         setInstallError(String(err));
